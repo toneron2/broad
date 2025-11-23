@@ -1,0 +1,328 @@
+# FHIR R4 Patient Resource ↔ ERPNext Patient DocType Mapping
+
+metadata:
+  version: 1.0.0
+  fhir_version: R4
+  last_updated: 2025-11-22
+  description: Bidirectional mapping between FHIR Patient resource and ERPNext Patient DocType
+
+mapping:
+  erpnext_doctype: Patient
+  fhir_resource: Patient
+  fhir_profile: http://hl7.org/fhir/StructureDefinition/Patient
+
+  # Primary identifier mapping
+  primary_identifier:
+    erpnext_field: name  # ERPNext Patient ID (MRN)
+    fhir_path: identifier[type.coding.code='MR'].value
+    fhir_system: http://hospital.example.org/mrn
+    direction: bidirectional
+
+  # Name mappings
+  name:
+    # Patient full name
+    - erpnext_field: patient_name
+      fhir_path: name[use='official'].text
+      direction: bidirectional
+      required: true
+
+    # Given name (first name)
+    - erpnext_field: first_name
+      fhir_path: name[use='official'].given[0]
+      direction: bidirectional
+
+    # Middle name
+    - erpnext_field: middle_name
+      fhir_path: name[use='official'].given[1]
+      direction: bidirectional
+
+    # Family name (last name)
+    - erpnext_field: last_name
+      fhir_path: name[use='official'].family
+      direction: bidirectional
+
+  # Demographics
+  demographics:
+    # Gender
+    - erpnext_field: sex
+      fhir_path: gender
+      direction: bidirectional
+      value_mapping:
+        Male: male
+        Female: female
+        Other: other
+        Unknown: unknown
+
+    # Date of birth
+    - erpnext_field: dob
+      fhir_path: birthDate
+      direction: bidirectional
+      data_type: date
+
+    # Marital status
+    - erpnext_field: marital_status
+      fhir_path: maritalStatus.coding[0].code
+      direction: bidirectional
+      fhir_system: http://terminology.hl7.org/CodeSystem/v3-MaritalStatus
+      value_mapping:
+        Single: S
+        Married: M
+        Divorced: D
+        Widowed: W
+
+  # Contact information
+  contact:
+    # Mobile phone
+    - erpnext_field: mobile
+      fhir_path: telecom[system='phone' and use='mobile'].value
+      direction: bidirectional
+
+    # Home phone
+    - erpnext_field: phone
+      fhir_path: telecom[system='phone' and use='home'].value
+      direction: bidirectional
+
+    # Email
+    - erpnext_field: email
+      fhir_path: telecom[system='email'].value
+      direction: bidirectional
+
+  # Address
+  address:
+    # Street address (line 1)
+    - erpnext_field: address
+      fhir_path: address[use='home'].line[0]
+      direction: bidirectional
+
+    # City
+    - erpnext_field: city
+      fhir_path: address[use='home'].city
+      direction: bidirectional
+
+    # State
+    - erpnext_field: state
+      fhir_path: address[use='home'].state
+      direction: bidirectional
+
+    # Postal code
+    - erpnext_field: pincode
+      fhir_path: address[use='home'].postalCode
+      direction: bidirectional
+
+    # Country
+    - erpnext_field: country
+      fhir_path: address[use='home'].country
+      direction: bidirectional
+
+  # Additional identifiers
+  identifiers:
+    # Social Security Number
+    - erpnext_field: uid
+      fhir_path: identifier[type.coding.code='SB'].value
+      fhir_system: http://hl7.org/fhir/sid/us-ssn
+      direction: bidirectional
+
+    # Driver's License
+    - erpnext_field: custom_drivers_license
+      fhir_path: identifier[type.coding.code='DL'].value
+      fhir_system: http://terminology.hl7.org/CodeSystem/v2-0203
+      direction: bidirectional
+
+  # Language and communication
+  communication:
+    # Primary language
+    - erpnext_field: patient_primary_language
+      fhir_path: communication[preferred=true].language.coding[0].code
+      fhir_system: urn:ietf:bcp:47
+      direction: bidirectional
+
+  # Emergency contact
+  emergency_contact:
+    # Emergency contact name
+    - erpnext_field: emergency_contact_name
+      fhir_path: contact[relationship.coding.code='C'].name.text
+      direction: bidirectional
+
+    # Emergency contact phone
+    - erpnext_field: emergency_contact_number
+      fhir_path: contact[relationship.coding.code='C'].telecom[system='phone'].value
+      direction: bidirectional
+
+  # Status and flags
+  status:
+    # Active status
+    - erpnext_field: disabled
+      fhir_path: active
+      direction: bidirectional
+      transform:
+        to_fhir: "lambda disabled: not disabled"  # disabled=1 → active=false
+        to_erpnext: "lambda active: not active"   # active=false → disabled=1
+
+    # Deceased indicator
+    - erpnext_field: custom_deceased
+      fhir_path: deceasedBoolean
+      direction: bidirectional
+
+    # Deceased date
+    - erpnext_field: custom_deceased_date
+      fhir_path: deceasedDateTime
+      direction: bidirectional
+      data_type: datetime
+
+  # Extensions (ERPNext-specific fields)
+  extensions:
+    # Blood group
+    - erpnext_field: blood_group
+      fhir_extension_url: http://erpnext.example.org/fhir/StructureDefinition/blood-group
+      fhir_path: extension[url='blood-group'].valueCodeableConcept.coding[0].code
+      direction: bidirectional
+
+    # Occupation
+    - erpnext_field: occupation
+      fhir_extension_url: http://erpnext.example.org/fhir/StructureDefinition/occupation
+      fhir_path: extension[url='occupation'].valueString
+      direction: bidirectional
+
+    # Patient relation (for dependents)
+    - erpnext_field: patient_relation
+      fhir_extension_url: http://erpnext.example.org/fhir/StructureDefinition/patient-relation
+      fhir_path: extension[url='patient-relation'].valueString
+      direction: bidirectional
+
+# Sync configuration
+sync_config:
+  # Sync direction
+  sync_direction: bidirectional  # bidirectional, to_fhir, to_erpnext
+
+  # Conflict resolution
+  conflict_resolution:
+    strategy: last_updated_wins
+    source_priority: erpnext  # erpnext or fhir
+
+  # Sync triggers
+  triggers:
+    erpnext_to_fhir:
+      - on_insert
+      - on_update
+    fhir_to_erpnext:
+      - webhook
+      - scheduled_poll  # fallback if webhooks not available
+
+  # Sync schedule (for polling)
+  poll_interval: 300  # seconds (5 minutes)
+
+  # Filtering
+  filters:
+    # Only sync active patients
+    erpnext_filter: "disabled = 0"
+    fhir_filter: "active = true"
+
+# Validation rules
+validation:
+  required_fields:
+    erpnext:
+      - patient_name
+      - first_name
+      - last_name
+      - sex
+      - dob
+    fhir:
+      - name
+      - gender
+      - birthDate
+
+  data_quality:
+    # Phone number format
+    - field: mobile
+      regex: "^\\+?1?\\d{10,15}$"
+      error_message: "Invalid phone number format"
+
+    # Email format
+    - field: email
+      regex: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+      error_message: "Invalid email format"
+
+    # Date of birth constraints
+    - field: dob
+      constraint: "dob < today"
+      error_message: "Date of birth cannot be in the future"
+
+# Error handling
+error_handling:
+  on_mapping_error:
+    action: log_and_skip_field
+    log_level: warning
+
+  on_validation_error:
+    action: reject_sync
+    log_level: error
+
+  on_conflict:
+    action: apply_strategy  # Use conflict_resolution.strategy
+    log_level: info
+
+# Audit and logging
+audit:
+  log_all_syncs: true
+  log_data_changes: true
+  retention_days: 90
+
+# Performance optimization
+performance:
+  batch_size: 100
+  parallel_processing: true
+  max_workers: 4
+  cache_ttl: 300  # seconds
+
+# Testing
+test_data:
+  erpnext_sample:
+    patient_name: "John Michael Doe"
+    first_name: "John"
+    middle_name: "Michael"
+    last_name: "Doe"
+    sex: "Male"
+    dob: "1980-05-15"
+    mobile: "+1-555-0123"
+    email: "john.doe@example.com"
+    address: "123 Main Street"
+    city: "Springfield"
+    state: "IL"
+    pincode: "62701"
+    blood_group: "A+"
+
+  fhir_sample:
+    resourceType: "Patient"
+    identifier:
+      - system: "http://hospital.example.org/mrn"
+        type:
+          coding:
+            - code: "MR"
+              system: "http://terminology.hl7.org/CodeSystem/v2-0203"
+        value: "PAT-00001"
+    name:
+      - use: "official"
+        text: "John Michael Doe"
+        family: "Doe"
+        given: ["John", "Michael"]
+    gender: "male"
+    birthDate: "1980-05-15"
+    telecom:
+      - system: "phone"
+        value: "+1-555-0123"
+        use: "mobile"
+      - system: "email"
+        value: "john.doe@example.com"
+    address:
+      - use: "home"
+        line: ["123 Main Street"]
+        city: "Springfield"
+        state: "IL"
+        postalCode: "62701"
+        country: "USA"
+    extension:
+      - url: "http://erpnext.example.org/fhir/StructureDefinition/blood-group"
+        valueCodeableConcept:
+          coding:
+            - code: "A+"
+              display: "A positive"

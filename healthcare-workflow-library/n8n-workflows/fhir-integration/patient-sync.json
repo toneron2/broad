@@ -1,0 +1,335 @@
+{
+  "name": "FHIR Patient Bidirectional Sync",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "start-node",
+      "name": "When clicking 'Test workflow'",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "fhir-patient-sync",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook - ERPNext Patient Updated",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 450],
+      "webhookId": "erpnext-patient-webhook"
+    },
+    {
+      "parameters": {
+        "scheduleTrigger": "custom",
+        "cronExpression": "*/5 * * * *"
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule - Poll FHIR Server",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1,
+      "position": [250, 600]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.trigger_source }}",
+              "operation": "equals",
+              "value2": "erpnext"
+            }
+          ]
+        }
+      },
+      "id": "if-from-erpnext",
+      "name": "IF Source is ERPNext",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [500, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ERPNEXT_URL }}/api/resource/Patient/{{ $json.patient_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "id": "get-erpnext-patient",
+      "name": "Get ERPNext Patient Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [750, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Transform ERPNext Patient to FHIR Patient Resource\nconst patient = $input.item.json.data;\n\n// Build FHIR Patient resource\nconst fhirPatient = {\n  resourceType: \"Patient\",\n  identifier: [\n    {\n      system: \"http://hospital.example.org/mrn\",\n      type: {\n        coding: [{\n          system: \"http://terminology.hl7.org/CodeSystem/v2-0203\",\n          code: \"MR\"\n        }]\n      },\n      value: patient.name\n    }\n  ],\n  active: !patient.disabled,\n  name: [\n    {\n      use: \"official\",\n      text: patient.patient_name,\n      family: patient.last_name,\n      given: [patient.first_name, patient.middle_name].filter(n => n)\n    }\n  ],\n  gender: patient.sex?.toLowerCase(),\n  birthDate: patient.dob,\n  telecom: [\n    {\n      system: \"phone\",\n      value: patient.mobile,\n      use: \"mobile\"\n    },\n    {\n      system: \"email\",\n      value: patient.email\n    }\n  ].filter(t => t.value),\n  address: [\n    {\n      use: \"home\",\n      line: [patient.address],\n      city: patient.city,\n      state: patient.state,\n      postalCode: patient.pincode,\n      country: patient.country\n    }\n  ],\n  maritalStatus: {\n    coding: [{\n      system: \"http://terminology.hl7.org/CodeSystem/v3-MaritalStatus\",\n      code: getMaritalStatusCode(patient.marital_status)\n    }]\n  },\n  extension: []\n};\n\n// Add blood group extension if present\nif (patient.blood_group) {\n  fhirPatient.extension.push({\n    url: \"http://erpnext.example.org/fhir/StructureDefinition/blood-group\",\n    valueCodeableConcept: {\n      coding: [{\n        code: patient.blood_group,\n        display: patient.blood_group\n      }]\n    }\n  });\n}\n\nfunction getMaritalStatusCode(status) {\n  const mapping = {\n    'Single': 'S',\n    'Married': 'M',\n    'Divorced': 'D',\n    'Widowed': 'W'\n  };\n  return mapping[status] || 'UNK';\n}\n\nreturn { json: fhirPatient };"
+      },
+      "id": "transform-to-fhir",
+      "name": "Transform ERPNext → FHIR",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.FHIR_SERVER_URL }}/Patient",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "=",
+              "value": "={{ JSON.stringify($json) }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        }
+      },
+      "id": "create-fhir-patient",
+      "name": "Create/Update FHIR Patient",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.FHIR_SERVER_URL }}/Patient",
+        "qs": {
+          "parameters": [
+            {
+              "name": "_lastUpdated",
+              "value": "=gt{{ $json.last_sync_time || '2025-01-01T00:00:00Z' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-fhir-patients",
+      "name": "Get Updated FHIR Patients",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [750, 600]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Transform FHIR Patient to ERPNext Patient\nconst fhirPatient = $input.item.json;\n\n// Extract name components\nconst officialName = fhirPatient.name?.find(n => n.use === 'official') || fhirPatient.name?.[0] || {};\n\n// Build ERPNext Patient data\nconst erpnextPatient = {\n  doctype: \"Patient\",\n  patient_name: officialName.text || `${officialName.given?.[0]} ${officialName.family}`,\n  first_name: officialName.given?.[0],\n  middle_name: officialName.given?.[1],\n  last_name: officialName.family,\n  sex: fhirPatient.gender?.charAt(0).toUpperCase() + fhirPatient.gender?.slice(1),\n  dob: fhirPatient.birthDate,\n  mobile: fhirPatient.telecom?.find(t => t.system === 'phone' && t.use === 'mobile')?.value,\n  phone: fhirPatient.telecom?.find(t => t.system === 'phone' && t.use === 'home')?.value,\n  email: fhirPatient.telecom?.find(t => t.system === 'email')?.value,\n  disabled: fhirPatient.active === false ? 1 : 0\n};\n\n// Extract address\nconst homeAddress = fhirPatient.address?.find(a => a.use === 'home') || fhirPatient.address?.[0];\nif (homeAddress) {\n  erpnextPatient.address = homeAddress.line?.[0];\n  erpnextPatient.city = homeAddress.city;\n  erpnextPatient.state = homeAddress.state;\n  erpnextPatient.pincode = homeAddress.postalCode;\n  erpnextPatient.country = homeAddress.country;\n}\n\n// Extract marital status\nif (fhirPatient.maritalStatus?.coding?.[0]?.code) {\n  const maritalMapping = {\n    'S': 'Single',\n    'M': 'Married',\n    'D': 'Divorced',\n    'W': 'Widowed'\n  };\n  erpnextPatient.marital_status = maritalMapping[fhirPatient.maritalStatus.coding[0].code];\n}\n\n// Extract blood group from extension\nconst bloodGroupExt = fhirPatient.extension?.find(e => e.url.includes('blood-group'));\nif (bloodGroupExt) {\n  erpnextPatient.blood_group = bloodGroupExt.valueCodeableConcept?.coding?.[0]?.code;\n}\n\n// Extract MRN from identifier\nconst mrnIdentifier = fhirPatient.identifier?.find(i => i.type?.coding?.some(c => c.code === 'MR'));\nif (mrnIdentifier) {\n  erpnextPatient.name = mrnIdentifier.value;\n}\n\nreturn { json: erpnextPatient };"
+      },
+      "id": "transform-to-erpnext",
+      "name": "Transform FHIR → ERPNext",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1000, 600]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ERPNEXT_URL }}/api/resource/Patient",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=token {{ $env.ERPNEXT_API_KEY }}:{{ $env.ERPNEXT_API_SECRET }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "data",
+              "value": "={{ JSON.stringify($json) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-erpnext-patient",
+      "name": "Create/Update ERPNext Patient",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1250, 600]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ { success: true, synced: $json.id || $json.name } }}"
+      },
+      "id": "respond-success",
+      "name": "Respond - Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1500, 450]
+    },
+    {
+      "parameters": {
+        "keepOnlySummary": true,
+        "summary": "=Patient sync completed. ERPNext→FHIR: {{ $('Create/Update FHIR Patient').itemMatching(0).$json.id }}, FHIR→ERPNext: {{ $('Create/Update ERPNext Patient').itemMatching(0).$json.name }}"
+      },
+      "id": "log-sync",
+      "name": "Log Sync Status",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [1500, 300]
+    }
+  ],
+  "connections": {
+    "When clicking 'Test workflow'": {
+      "main": [
+        [
+          {
+            "node": "IF Source is ERPNext",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Webhook - ERPNext Patient Updated": {
+      "main": [
+        [
+          {
+            "node": "IF Source is ERPNext",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule - Poll FHIR Server": {
+      "main": [
+        [
+          {
+            "node": "Get Updated FHIR Patients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF Source is ERPNext": {
+      "main": [
+        [
+          {
+            "node": "Get ERPNext Patient Data",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get Updated FHIR Patients",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get ERPNext Patient Data": {
+      "main": [
+        [
+          {
+            "node": "Transform ERPNext → FHIR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform ERPNext → FHIR": {
+      "main": [
+        [
+          {
+            "node": "Create/Update FHIR Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create/Update FHIR Patient": {
+      "main": [
+        [
+          {
+            "node": "Log Sync Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Updated FHIR Patients": {
+      "main": [
+        [
+          {
+            "node": "Transform FHIR → ERPNext",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Transform FHIR → ERPNext": {
+      "main": [
+        [
+          {
+            "node": "Create/Update ERPNext Patient",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create/Update ERPNext Patient": {
+      "main": [
+        [
+          {
+            "node": "Log Sync Status",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Respond - Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "fhir",
+      "id": "fhir-tag"
+    },
+    {
+      "name": "healthcare",
+      "id": "healthcare-tag"
+    },
+    {
+      "name": "interoperability",
+      "id": "interop-tag"
+    }
+  ],
+  "meta": {
+    "instanceId": "workflow-library"
+  }
+}

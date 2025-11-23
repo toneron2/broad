@@ -1,0 +1,195 @@
+# FHIR R4 Encounter Resource ↔ ERPNext Patient Encounter DocType Mapping
+
+metadata:
+  version: 1.0.0
+  fhir_version: R4
+  last_updated: 2025-11-22
+  description: Bidirectional mapping between FHIR Encounter resource and ERPNext Patient Encounter DocType
+
+mapping:
+  erpnext_doctype: Patient Encounter
+  fhir_resource: Encounter
+  fhir_profile: http://hl7.org/fhir/StructureDefinition/Encounter
+
+  # Primary identifier
+  primary_identifier:
+    erpnext_field: name  # ERPNext Encounter ID
+    fhir_path: identifier[0].value
+    fhir_system: http://hospital.example.org/encounter-id
+    direction: bidirectional
+
+  # Patient reference
+  patient:
+    - erpnext_field: patient
+      fhir_path: subject.reference
+      direction: bidirectional
+      reference_type: Patient
+      transform:
+        to_fhir: "lambda patient_id: f'Patient/{patient_id}'"
+        to_erpnext: "lambda ref: ref.split('/')[-1]"  # Extract ID from Patient/ID
+
+  # Encounter details
+  encounter:
+    # Encounter type/class
+    - erpnext_field: appointment_type
+      fhir_path: class.code
+      direction: bidirectional
+      fhir_system: http://terminology.hl7.org/CodeSystem/v3-ActCode
+      value_mapping:
+        "Emergency": "EMER"
+        "Inpatient": "IMP"
+        "Outpatient": "AMB"
+        "Observation": "OBSENC"
+        "Virtual": "VR"
+
+    # Encounter status
+    - erpnext_field: docstatus
+      fhir_path: status
+      direction: bidirectional
+      value_mapping:
+        0: planned      # Draft
+        1: finished     # Submitted
+        2: cancelled    # Cancelled
+
+  # Timing
+  timing:
+    # Encounter date/time
+    - erpnext_field: encounter_date
+      fhir_path: period.start
+      direction: bidirectional
+      data_type: datetime
+
+    # Encounter end time
+    - erpnext_field: encounter_time
+      fhir_path: period.end
+      direction: bidirectional
+      data_type: datetime
+
+  # Provider/Practitioner
+  practitioner:
+    # Primary practitioner
+    - erpnext_field: practitioner
+      fhir_path: participant[type.coding.code='PPRF'].individual.reference
+      direction: bidirectional
+      reference_type: Practitioner
+      transform:
+        to_fhir: "lambda practitioner_id: f'Practitioner/{practitioner_id}'"
+        to_erpnext: "lambda ref: ref.split('/')[-1]"
+
+  # Service/Department
+  service:
+    # Healthcare service unit (department)
+    - erpnext_field: healthcare_service_unit
+      fhir_path: serviceType.coding[0].display
+      direction: bidirectional
+
+    # Appointment reference
+    - erpnext_field: appointment
+      fhir_path: appointment[0].reference
+      direction: bidirectional
+      reference_type: Appointment
+      transform:
+        to_fhir: "lambda appt_id: f'Appointment/{appt_id}' if appt_id else None"
+        to_erpnext: "lambda ref: ref.split('/')[-1] if ref else None"
+
+  # Clinical details
+  clinical:
+    # Chief complaint
+    - erpnext_field: symptoms
+      fhir_path: reasonCode[0].text
+      direction: bidirectional
+
+    # Diagnosis (primary)
+    - erpnext_field: diagnosis
+      fhir_path: diagnosis[primary=true].condition.display
+      direction: bidirectional
+
+  # Visit details
+  visit:
+    # Company/Organization
+    - erpnext_field: company
+      fhir_path: serviceProvider.reference
+      direction: bidirectional
+      reference_type: Organization
+      transform:
+        to_fhir: "lambda company: f'Organization/{company}'"
+        to_erpnext: "lambda ref: ref.split('/')[-1]"
+
+  # Extensions
+  extensions:
+    # Patient height
+    - erpnext_field: custom_height
+      fhir_extension_url: http://erpnext.example.org/fhir/StructureDefinition/height
+      fhir_path: extension[url='height'].valueQuantity.value
+      direction: bidirectional
+
+    # Patient weight
+    - erpnext_field: custom_weight
+      fhir_extension_url: http://erpnext.example.org/fhir/StructureDefinition/weight
+      fhir_path: extension[url='weight'].valueQuantity.value
+      direction: bidirectional
+
+# Sync configuration
+sync_config:
+  sync_direction: bidirectional
+  conflict_resolution:
+    strategy: last_updated_wins
+    source_priority: erpnext
+
+  triggers:
+    erpnext_to_fhir:
+      - on_submit
+      - on_update
+    fhir_to_erpnext:
+      - webhook
+      - scheduled_poll
+
+  poll_interval: 300
+
+# Validation
+validation:
+  required_fields:
+    erpnext:
+      - patient
+      - encounter_date
+      - practitioner
+    fhir:
+      - subject
+      - status
+      - class
+
+# Test data
+test_data:
+  erpnext_sample:
+    patient: "PAT-00001"
+    encounter_date: "2025-11-22 10:30:00"
+    encounter_time: "2025-11-22 11:15:00"
+    appointment_type: "Outpatient"
+    practitioner: "PRA-00001"
+    symptoms: "Fever and cough for 3 days"
+    healthcare_service_unit: "General Medicine"
+
+  fhir_sample:
+    resourceType: "Encounter"
+    status: "finished"
+    class:
+      system: "http://terminology.hl7.org/CodeSystem/v3-ActCode"
+      code: "AMB"
+      display: "ambulatory"
+    subject:
+      reference: "Patient/PAT-00001"
+    participant:
+      - type:
+          - coding:
+              - code: "PPRF"
+                system: "http://terminology.hl7.org/CodeSystem/v3-ParticipationType"
+        individual:
+          reference: "Practitioner/PRA-00001"
+    period:
+      start: "2025-11-22T10:30:00Z"
+      end: "2025-11-22T11:15:00Z"
+    reasonCode:
+      - text: "Fever and cough for 3 days"
+    serviceType:
+      coding:
+        - display: "General Medicine"

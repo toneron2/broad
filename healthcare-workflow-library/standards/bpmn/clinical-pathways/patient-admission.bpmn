@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<bpmn:definitions xmlns:bpmn="http://www.omg.org/spec/BPMN/20100524/MODEL"
+                   xmlns:bpmndi="http://www.omg.org/spec/BPMN/20100524/DI"
+                   xmlns:dc="http://www.omg.org/spec/DD/20100524/DC"
+                   xmlns:di="http://www.omg.org/spec/DD/20100524/DI"
+                   id="Definitions_PatientAdmission"
+                   targetNamespace="http://bpmn.io/schema/bpmn"
+                   exporter="BROAD Healthcare Workflow Library"
+                   exporterVersion="1.0.0">
+
+  <bpmn:process id="PatientAdmissionProcess" name="Patient Admission Workflow" isExecutable="true">
+
+    <!-- Start Event -->
+    <bpmn:startEvent id="StartEvent_PatientArrival" name="Patient Arrives">
+      <bpmn:outgoing>Flow_ToRegistration</bpmn:outgoing>
+    </bpmn:startEvent>
+
+    <!-- Task: Patient Registration -->
+    <bpmn:serviceTask id="Task_PatientRegistration" name="Register Patient">
+      <bpmn:documentation>
+        Create or update patient record in ERPNext.
+        Collect demographics, insurance information, emergency contact.
+      </bpmn:documentation>
+      <bpmn:extensionElements>
+        <implementation type="erpnext_api">
+          <doctype>Patient</doctype>
+          <operation>create_or_update</operation>
+        </implementation>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToRegistration</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToTriageCheck</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Gateway: Is Triage Needed? -->
+    <bpmn:exclusiveGateway id="Gateway_TriageNeeded" name="Triage Needed?">
+      <bpmn:incoming>Flow_ToTriageCheck</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToTriage</bpmn:outgoing>
+      <bpmn:outgoing>Flow_SkipTriage</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Task: Triage Assessment -->
+    <bpmn:userTask id="Task_TriageAssessment" name="Perform Triage Assessment">
+      <bpmn:documentation>
+        Assess patient severity and prioritize care.
+        Record vital signs, chief complaint, pain level.
+      </bpmn:documentation>
+      <bpmn:extensionElements>
+        <implementation type="erpnext_api">
+          <doctype>Vital Signs</doctype>
+          <operation>create</operation>
+        </implementation>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToTriage</bpmn:incoming>
+      <bpmn:outgoing>Flow_FromTriage</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <!-- Joining Gateway -->
+    <bpmn:exclusiveGateway id="Gateway_JoinTriage">
+      <bpmn:incoming>Flow_FromTriage</bpmn:incoming>
+      <bpmn:incoming>Flow_SkipTriage</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEncounter</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Task: Create Encounter -->
+    <bpmn:serviceTask id="Task_CreateEncounter" name="Create Patient Encounter">
+      <bpmn:documentation>
+        Create encounter record linking patient, practitioner, and appointment.
+      </bpmn:documentation>
+      <bpmn:extensionElements>
+        <implementation type="erpnext_api">
+          <doctype>Patient Encounter</doctype>
+          <operation>create</operation>
+        </implementation>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToEncounter</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToFHIRSync</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Task: Sync to FHIR -->
+    <bpmn:serviceTask id="Task_SyncFHIR" name="Sync Encounter to FHIR">
+      <bpmn:documentation>
+        Create FHIR Encounter resource and sync to FHIR server.
+      </bpmn:documentation>
+      <bpmn:extensionElements>
+        <implementation type="n8n_workflow">
+          <workflow_id>fhir_encounter_sync</workflow_id>
+        </implementation>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToFHIRSync</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToAssignBed</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Gateway: Admission Type -->
+    <bpmn:exclusiveGateway id="Gateway_AdmissionType" name="Admission Type?">
+      <bpmn:incoming>Flow_ToAssignBed</bpmn:incoming>
+      <bpmn:outgoing>Flow_Inpatient</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Observation</bpmn:outgoing>
+      <bpmn:outgoing>Flow_Outpatient</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Task: Assign Bed (Inpatient) -->
+    <bpmn:userTask id="Task_AssignBed" name="Assign Bed to Patient">
+      <bpmn:documentation>
+        Assign appropriate bed based on department and availability.
+      </bpmn:documentation>
+      <bpmn:extensionElements>
+        <implementation type="erpnext_api">
+          <doctype>Healthcare Service Unit</doctype>
+          <operation>allocate_bed</operation>
+        </implementation>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_Inpatient</bpmn:incoming>
+      <bpmn:outgoing>Flow_FromBedAssignment</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <!-- Task: Assign Observation Unit -->
+    <bpmn:userTask id="Task_AssignObservation" name="Assign to Observation Unit">
+      <bpmn:incoming>Flow_Observation</bpmn:incoming>
+      <bpmn:outgoing>Flow_FromObservation</bpmn:outgoing>
+    </bpmn:userTask>
+
+    <!-- Task: Schedule Follow-up (Outpatient) -->
+    <bpmn:serviceTask id="Task_ScheduleFollowup" name="Schedule Follow-up Appointment">
+      <bpmn:incoming>Flow_Outpatient</bpmn:incoming>
+      <bpmn:outgoing>Flow_FromSchedule</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- Joining Gateway -->
+    <bpmn:exclusiveGateway id="Gateway_JoinAdmissionType">
+      <bpmn:incoming>Flow_FromBedAssignment</bpmn:incoming>
+      <bpmn:incoming>Flow_FromObservation</bpmn:incoming>
+      <bpmn:incoming>Flow_FromSchedule</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToNotification</bpmn:outgoing>
+    </bpmn:exclusiveGateway>
+
+    <!-- Task: Send Notifications -->
+    <bpmn:serviceTask id="Task_SendNotifications" name="Send Admission Notifications">
+      <bpmn:documentation>
+        Notify care team, update patient status, send confirmation to patient.
+      </bpmn:documentation>
+      <bpmn:extensionElements>
+        <implementation type="n8n_workflow">
+          <workflow_id>admission_notifications</workflow_id>
+        </implementation>
+      </bpmn:extensionElements>
+      <bpmn:incoming>Flow_ToNotification</bpmn:incoming>
+      <bpmn:outgoing>Flow_ToEnd</bpmn:outgoing>
+    </bpmn:serviceTask>
+
+    <!-- End Event -->
+    <bpmn:endEvent id="EndEvent_AdmissionComplete" name="Admission Complete">
+      <bpmn:incoming>Flow_ToEnd</bpmn:incoming>
+    </bpmn:endEvent>
+
+    <!-- Sequence Flows -->
+    <bpmn:sequenceFlow id="Flow_ToRegistration" sourceRef="StartEvent_PatientArrival" targetRef="Task_PatientRegistration" />
+    <bpmn:sequenceFlow id="Flow_ToTriageCheck" sourceRef="Task_PatientRegistration" targetRef="Gateway_TriageNeeded" />
+
+    <bpmn:sequenceFlow id="Flow_ToTriage" name="Emergency/Urgent" sourceRef="Gateway_TriageNeeded" targetRef="Task_TriageAssessment">
+      <bpmn:conditionExpression>appointment_type in ['Emergency', 'Urgent']</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_SkipTriage" name="Scheduled" sourceRef="Gateway_TriageNeeded" targetRef="Gateway_JoinTriage">
+      <bpmn:conditionExpression>appointment_type == 'Scheduled'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_FromTriage" sourceRef="Task_TriageAssessment" targetRef="Gateway_JoinTriage" />
+    <bpmn:sequenceFlow id="Flow_ToEncounter" sourceRef="Gateway_JoinTriage" targetRef="Task_CreateEncounter" />
+    <bpmn:sequenceFlow id="Flow_ToFHIRSync" sourceRef="Task_CreateEncounter" targetRef="Task_SyncFHIR" />
+    <bpmn:sequenceFlow id="Flow_ToAssignBed" sourceRef="Task_SyncFHIR" targetRef="Gateway_AdmissionType" />
+
+    <bpmn:sequenceFlow id="Flow_Inpatient" name="Inpatient" sourceRef="Gateway_AdmissionType" targetRef="Task_AssignBed">
+      <bpmn:conditionExpression>admission_type == 'Inpatient'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_Observation" name="Observation" sourceRef="Gateway_AdmissionType" targetRef="Task_AssignObservation">
+      <bpmn:conditionExpression>admission_type == 'Observation'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_Outpatient" name="Outpatient" sourceRef="Gateway_AdmissionType" targetRef="Task_ScheduleFollowup">
+      <bpmn:conditionExpression>admission_type == 'Outpatient'</bpmn:conditionExpression>
+    </bpmn:sequenceFlow>
+
+    <bpmn:sequenceFlow id="Flow_FromBedAssignment" sourceRef="Task_AssignBed" targetRef="Gateway_JoinAdmissionType" />
+    <bpmn:sequenceFlow id="Flow_FromObservation" sourceRef="Task_AssignObservation" targetRef="Gateway_JoinAdmissionType" />
+    <bpmn:sequenceFlow id="Flow_FromSchedule" sourceRef="Task_ScheduleFollowup" targetRef="Gateway_JoinAdmissionType" />
+    <bpmn:sequenceFlow id="Flow_ToNotification" sourceRef="Gateway_JoinAdmissionType" targetRef="Task_SendNotifications" />
+    <bpmn:sequenceFlow id="Flow_ToEnd" sourceRef="Task_SendNotifications" targetRef="EndEvent_AdmissionComplete" />
+
+  </bpmn:process>
+
+  <!-- Metadata -->
+  <bpmn:message id="Message_PatientArrival" name="PatientArrivalMessage" />
+  <bpmn:message id="Message_AdmissionComplete" name="AdmissionCompleteMessage" />
+
+</bpmn:definitions>
