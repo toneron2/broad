@@ -1,0 +1,36 @@
+# NLP Translation Test Cases
+# Format: natural_language|expected_formal
+
+# === PROPOSITIONAL ===
+if P then Q|P → Q
+P and Q|P ∧ Q
+P or Q|P ∨ Q
+not P|¬P
+P if and only if Q|P ↔ Q
+# === MODAL ===
+it is necessary that P|□P
+necessarily P|□P
+it is possible that Q|◇Q
+possibly Q|◇Q
+# === DEONTIC ===
+must authenticate|O(authenticate)
+may access|P(access)
+must not modify|F(modify)
+it is obligatory that P|O(P)
+it is permitted that Q|P(Q)
+it is forbidden that R|F(R)
+# === EPISTEMIC ===
+alice knows that P|K_alice(P)
+bob believes that Q|B_bob(Q)
+# === TEMPORAL ===
+always P|G(P)
+eventually Q|F(Q)
+next R|○R
+P until Q|P U Q
+# === QUANTIFIERS ===
+for all x|∀x
+there exists y|∃y
+# === COMPOUND ===
+if P then Q and R|P → Q ∧ R
+not P or Q|¬P ∨ Q
+it is necessary that if P then Q|□P → Q

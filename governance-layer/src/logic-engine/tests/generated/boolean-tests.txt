@@ -1,0 +1,60 @@
+# Boolean Logic Test Cases
+# Format: expression|expected_result
+
+# === TAUTOLOGIES ===
+P ∨ ¬P|TAUTOLOGY
+¬(P ∧ ¬P)|TAUTOLOGY
+Q ∨ ¬Q|TAUTOLOGY
+¬(Q ∧ ¬Q)|TAUTOLOGY
+R ∨ ¬R|TAUTOLOGY
+¬(R ∧ ¬R)|TAUTOLOGY
+P ∨ ¬P|TAUTOLOGY
+¬¬P → P|TAUTOLOGY
+P → ¬¬P|TAUTOLOGY
+¬(P ∧ Q) ↔ (¬P ∨ ¬Q)|TAUTOLOGY
+¬(P ∨ Q) ↔ (¬P ∧ ¬Q)|TAUTOLOGY
+(P → Q) ↔ (¬P ∨ Q)|TAUTOLOGY
+(P → Q) ↔ ¬(P ∧ ¬Q)|TAUTOLOGY
+(P → Q) ↔ (¬Q → ¬P)|TAUTOLOGY
+(P → (Q → P))|TAUTOLOGY
+(P → (Q → R)) → ((P → Q) → (P → R))|TAUTOLOGY
+P ∧ (Q ∨ R) ↔ (P ∧ Q) ∨ (P ∧ R)|TAUTOLOGY
+P ∨ (Q ∧ R) ↔ (P ∨ Q) ∧ (P ∨ R)|TAUTOLOGY
+# === CONTRADICTIONS ===
+P ∧ ¬P|CONTRADICTION
+(P → Q) ∧ P ∧ ¬Q|CONTRADICTION
+# === VALID ARGUMENTS ===
+P, P → Q ⊢ Q|VALID
+¬Q, P → Q ⊢ ¬P|VALID
+P → Q, Q → R ⊢ P → R|VALID
+P ∨ Q, ¬P ⊢ Q|VALID
+P ∨ Q, P → R, Q → S ⊢ R ∨ S|VALID
+P ∧ Q ⊢ P|VALID
+P ∧ Q ⊢ Q|VALID
+P ⊢ P ∨ Q|VALID
+P, Q ⊢ P ∧ Q|VALID
+# === INVALID ARGUMENTS (FALLACIES) ===
+Q, P → Q ⊢ P|INVALID
+¬P, P → Q ⊢ ¬Q|INVALID
+P → Q, R → Q ⊢ P → R|INVALID
+# === CONTINGENT (SATISFIABLE) ===
+P → Q|INVALID
+P ∧ Q|SATISFIABLE
+P ∨ Q|SATISFIABLE
+# === COMBINATORIAL (2 variables) ===
+P ∧ Q|CHECK
+P ∧ ¬Q|CHECK
+¬P ∧ Q|CHECK
+¬P ∧ ¬Q|CHECK
+P ∨ Q|CHECK
+P ∨ ¬Q|CHECK
+¬P ∨ Q|CHECK
+¬P ∨ ¬Q|CHECK
+P → Q|CHECK
+P → ¬Q|CHECK
+¬P → Q|CHECK
+¬P → ¬Q|CHECK
+P ↔ Q|CHECK
+P ↔ ¬Q|CHECK
+¬P ↔ Q|CHECK
+¬P ↔ ¬Q|CHECK

@@ -1,111 +1,145 @@
 # BROAD: Business Resource Observability and Automation Deployment
 
-## Objective
-Deploy fully functional, observable ERPNext system on GCP with complete visibility and automation for demonstration to ERP professionals.
+**With ESN Governance Layer Integrated**
+
+## Project Status: ACTIVE DEVELOPMENT
+
+This is the **PRIMARY repository** for the unified BROAD + ESN platform. All other repositories (ESN, ESN0, etc.) are deprecated.
+
+## What This Is
+
+A **self-governing, self-observing enterprise platform** that demonstrates:
+1. **Agentic ERP**: AI agents managing enterprise operations
+2. **Formal Governance**: Multi-paradigm Logic Engine for access control
+3. **Healthcare Vertical**: Complex use case with FHIR, BPMN, UDS+, GS1
+4. **Full Observability**: See how the system functions, not just that it functions
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    USER INTERFACE                            │
+│          (Voice / Natural Language / Bio-Auth)               │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│              ESN GOVERNANCE LAYER                            │
+│  • QUIC Heartbeat (device registration/session)              │
+│  • Access Agent (Triple-Lock: bio + OAuth2 + Logic)          │
+│  • Logic Engine (Boolean, Modal, Deontic, Meta)              │
+│  [WORKING: governance-layer/src/]                            │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│                     BROAD PLATFORM                           │
+│  • MCP Servers (9 domains)                                   │
+│  • ERPNext + n8n                                             │
+│  • Databases, Redis, Observability                           │
+│  • GKE Infrastructure                                        │
+└───────────────────────────┬─────────────────────────────────┘
+                            │
+┌───────────────────────────▼─────────────────────────────────┐
+│              HEALTHCARE WORKFLOW LAYER                       │
+│  FHIR R4 │ BPMN Clinical Pathways │ UDS+ │ GS1 │ SNOMED     │
+│  [COMPLETE: healthcare-workflow-library/]                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Repository Structure
+
+```
+broad/
+├── EXECUTION.md                    # Active execution plan (START HERE)
+├── PROJECT.md                      # This file
+├── governance-layer/               # ESN Governance (WORKING)
+│   ├── src/
+│   │   ├── access_agent.py        # Governance gateway
+│   │   ├── heartbeat.py           # QUIC session management
+│   │   └── logic-engine/          # Multi-paradigm reasoning
+│   ├── specs/                     # Technical specifications
+│   └── patents/                   # Patent documents
+├── healthcare-workflow-library/    # Healthcare vertical (COMPLETE)
+│   ├── standards/                 # FHIR, BPMN, UDS+, GS1
+│   ├── mcp-server/               # Healthcare MCP tools
+│   └── n8n-workflows/            # Workflow templates
+└── archive/                       # Deprecated files
+```
 
 ## Core Components
-- **ERPNext**: Full ERP deployment (all modules)
-- **Terraform**: IaC for GCP provisioning
-- **n8n**: Workflow orchestration and integration layer
-- **MCP Servers**: Expose all ERP functionality via protocol
-- **Observability**: Complete operational metrics and testing visibility
-- **Testing**: Automated load testing, functional validation, multi-scale simulation
 
-## Approach
-1. Leverage existing community templates and deployments
-2. Configure comprehensive Terraform deployment for GCP
-3. Integrate full n8n workflow coverage for ERPNext operations
-4. Expose all functionality through MCP/agent protocols
-5. Implement full observability stack
-6. Configure automated testing from common to obscure operations
-7. Enable scale simulation and demonstration
+| Component | Status | Location |
+|-----------|--------|----------|
+| Logic Engine | WORKING | `governance-layer/src/logic-engine/` |
+| Access Agent | WORKING | `governance-layer/src/access_agent.py` |
+| Heartbeat Protocol | WORKING | `governance-layer/src/heartbeat.py` |
+| Healthcare Library | COMPLETE | `healthcare-workflow-library/` |
+| Terraform Modules | PENDING | Next sequence |
+| GKE Deployment | PENDING | Next sequence |
 
-## Status
-Initial setup - research phase
+## Key Decisions Made
 
-## Technology Stack (Research Complete)
+| Decision | Choice |
+|----------|--------|
+| ESN Integration | NOW (governance from start) |
+| Use Case | Demonstration + Healthcare + Generic ERP |
+| Hardware Path | Cloud → Orange Pi → Pixel |
+| Phase 0 Reasoning | Logic Engine (working) |
+| Observability | 100% → Intelligent Sampling |
+| Deployment | Configurable (chunked default) |
 
-### Core ERP Platform
-- **ERPNext**: Full deployment via official Frappe Helm chart
-- **Deployment**: GKE (Google Kubernetes Engine) + Terraform IaC
-- **Database**: Cloud SQL for MySQL (MariaDB 10.6+)
-- **Cache/Queue**: Memorystore for Redis (3 instances: cache, queue, socketio)
-- **Storage**: Persistent Disk + Cloud Storage (backups)
+## Quick Verification
 
-### Workflow Orchestration
-- **n8n**: Built-in ERPNext node (CRUD on all DocTypes)
-- **Integration**: Webhook-based triggers + API polling
-- **Coverage**: 2 AI templates exist, need comprehensive workflow library
-- **Deployment**: On GKE alongside ERPNext
+```bash
+# Test Logic Engine
+cd governance-layer/src/logic-engine
+./logic "P ∨ ¬P"                    # → TAUTOLOGY
+./logic "O(auth) → P(access)"       # → VALID
 
-### MCP Exposure Layer
-- **Framework**: frappe/mcp (official Python library for Frappe)
-- **Pattern**: Decorator-based tool registration (@mcp.tool())
-- **Transport**: HTTP with Streamable SSE for production
-- **Examples**: rakeshgangwar/erpnext-mcp-server, ManotLuijiu/erpnext_mcp_server
-- **Scope**: Expose all DocTypes + custom business operations
+# Test Access Agent
+cd governance-layer/src
+python3 access_agent.py
 
-### Observability Stack
-- **Instrumentation**: OpenTelemetry SDK
-- **Metrics**: Managed Service for Prometheus + Cloud Monitoring
-- **Logging**: Cloud Logging + optional Loki
-- **Tracing**: Cloud Trace + optional Tempo
-- **Visualization**: Grafana (primary) + Cloud Console
-- **Profiling**: Cloud Profiler
+# Test Heartbeat
+python3 heartbeat.py
+```
 
-### Testing Infrastructure
-- **Load Testing**: k6 with k6 Operator on GKE
-- **Functional Testing**: pytest + Selenium
-- **API Testing**: pytest + requests
-- **Test Orchestration**: n8n workflows for automated test execution
+## Next Sequence
 
-### Infrastructure Deployment
-- **IaC**: Terraform (no existing ERPNext+GCP module, need to build)
-- **Container Orchestration**: Kubernetes via GKE
-- **Application Deployment**: Helm chart (frappe/helm - official)
-- **CI/CD**: Cloud Build potential
+See `EXECUTION.md` for detailed sequence. Next up:
+1. Create Terraform modules (infrastructure layer)
+2. Deploy GKE cluster
+3. Deploy databases and observability
+4. Deploy ERPNext + n8n with governance hooks
 
-## Key Research Findings
+## Technology Stack
 
-### What Exists
-- Official Frappe Helm chart (production-ready)
-- Built-in n8n ERPNext node
-- Multiple MCP server implementations (Python/TypeScript)
-- OpenTelemetry + Prometheus + Grafana stack (mature)
-- k6 load testing framework (Kubernetes-native)
+### Governance Layer (ESN)
+- **Logic Engine**: Multi-paradigm formal reasoning (bash/awk/sed)
+- **Paradigms**: Boolean, Modal (Kripke), Deontic (O/P/F), Meta
+- **Protocol**: QUIC-based heartbeat
+- **Target**: <50ms access decisions
 
-### What Needs Building
-- Terraform module for GCP infrastructure (GKE + Cloud SQL + Memorystore)
-- Comprehensive n8n workflow library (only 2 templates exist)
-- Complete MCP server exposing all ERP functionality
-- Custom Grafana dashboards for ERP observability
-- Multi-scale testing scenarios and automation
-- GCS backup integration
+### Platform Layer (BROAD)
+- **ERP**: ERPNext (full deployment)
+- **Workflows**: n8n orchestration
+- **Infrastructure**: GKE + Terraform
+- **Database**: Self-hosted MariaDB
+- **Cache**: Self-hosted Redis
+- **Observability**: OpenTelemetry + Prometheus + Grafana
 
-## Stack Decisions Needed
+### Healthcare Layer
+- **Clinical Data**: FHIR R4 (HAPI FHIR server)
+- **Pathways**: BPMN 2.0 clinical workflows
+- **Reporting**: UDS+ federal compliance
+- **Supply Chain**: GS1 (24 hospital processes)
+- **Terminology**: SNOMED, LOINC, RxNorm
 
-### Infrastructure Choices
-1. **Pure GKE vs Hybrid**: All on GKE or mix with Compute Engine?
-2. **Database**: Fully managed Cloud SQL vs self-managed MariaDB on GKE?
-3. **Redis**: Memorystore for Redis vs self-managed?
-4. **Storage**: GCS integration approach for ERPNext files/backups?
+## Contact
 
-### Observability Trade-offs
-1. **Hybrid vs Pure GCP**: OpenTelemetry + Grafana + Prometheus OR pure Cloud Operations Suite?
-2. **Cost vs Features**: Managed Prometheus vs self-hosted?
-3. **Log Strategy**: Cloud Logging only OR Cloud Logging + Loki for cost optimization?
+- **Organization**: TODOMODO.IO Agency LLC
+- **Lead**: Anthony R. Slosar
+- **Telegram**: [@toneron2](https://t.me/toneron2)
 
-### MCP Architecture
-1. **Granularity**: One MCP server for all ERPNext OR module-specific servers (Sales, Inventory, Manufacturing)?
-2. **Transport**: Stdio (local) vs HTTP/SSE (remote) for demonstration?
-3. **Security**: OAuth2 implementation from start OR API key for initial demo?
+## Copyright
 
-### Testing Scope
-1. **Scale Targets**: What user counts per enterprise size tier?
-2. **Test Data**: Synthetic generation OR anonymized production data?
-3. **Automation Level**: Fully automated test suite OR manual validation checkpoints?
-
-## Next Steps
-- Finalize technology stack choices
-- Define deployment architecture
-- Begin Terraform module development
+COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED

@@ -1,0 +1,131 @@
+# Unicode Semantic Dictionary - Multi-Logic Processing Architecture
+# Patent: Unicode Semantic Dictionary and Multi-Logic Processing Architecture for Modular Reasoning Systems
+# Format: Symbol	Unicode	Systems	Function	Rule
+# Based on Figures 1-15 of the patent application
+
+# ============================================================================
+# Fig. 1: Core Logical Operators
+# ============================================================================
+¬	U+00AC	all	NEGATION	NOT(P) → ¬P
+∧	U+2227	all	CONJUNCTION	AND(P,Q) → P ∧ Q
+∨	U+2228	all	DISJUNCTION	OR(P,Q) → P ∨ Q
+→	U+2192	all	IMPLICATION	IMPLIES(P,Q) → P → Q
+↔	U+2194	all	BICONDITIONAL	IFF(P,Q) → P ↔ Q
+⊤	U+22A4	all	TRUTH	TRUE() → ⊤
+⊥	U+22A5	all	FALSITY	FALSE() → ⊥
+
+# ============================================================================
+# Fig. 2: Quantifiers & Variable Binding
+# ============================================================================
+∀	U+2200	fol,hol,type	UNIVERSAL	FORALL[x,P] → ∀x P
+∃	U+2203	fol,hol,type	EXISTENTIAL	EXISTS[x,P] → ∃x P
+λ	U+03BB	type,hol	LAMBDA	LAMBDA[x,e] → λx.e
+μ	U+03BC	modal,temporal	LFP	LFP(X,φ) → μX.φ
+ν	U+03BD	modal,temporal	GFP	GFP(X,φ) → νX.φ
+
+# ============================================================================
+# Fig. 3: Modal & Temporal Operators
+# ============================================================================
+□	U+25A1	modal,temporal	NECESSITY	NECESSARY(P) → □P
+◇	U+25C7	modal,temporal	POSSIBILITY	POSSIBLE(P) → ◇P
+○	U+25CB	temporal	NEXT	NEXT(P) → ○P
+U	U+0055	temporal	UNTIL	UNTIL(P,Q) → P U Q
+R	U+0052	temporal	RELEASE	RELEASE(P,Q) → P R Q
+G	U+0047	temporal	GLOBALLY	GLOBALLY(P) → GP
+F	U+0046	temporal	FINALLY	FINALLY(P) → FP
+
+# ============================================================================
+# Fig. 4: Deontic (Normative) Operators
+# ============================================================================
+O	U+004F	deontic	OBLIGATION	OBLIGATORY(P) → OP
+P	U+0050	deontic	PERMISSION	PERMITTED(P) → PP
+F	U+0046	deontic	FORBIDDEN	FORBIDDEN(P) → FP
+⊙	U+2299	deontic	COND_OBL	COND_OBL(P,Q) → P ⊙ Q
+
+# ============================================================================
+# Fig. 5: Epistemic Operators
+# ============================================================================
+K	U+004B	epistemic	KNOWLEDGE	KNOWS(a,P) → K_a P
+B	U+0042	epistemic	BELIEF	BELIEVES(a,P) → B_a P
+C	U+0043	epistemic	COMMON	COMMON(P) → CP
+E	U+0045	epistemic	EVERYONE	EVERYONE(P) → EP
+
+# ============================================================================
+# Fig. 6: Fuzzy & Probabilistic Operators
+# ============================================================================
+⊙	U+2297	fuzzy	TNORM	TNORM(P,Q) → P ⊙ Q = min(P,Q)
+⊕	U+2295	fuzzy	TCONORM	TCONORM(P,Q) → P ⊕ Q = max(P,Q)
+⊸	U+228B	linear	LINEAR_IMP	LIMP(P,Q) → P ⊸ Q
+ℙ	U+2119	prob	PROBABILITY	PROB(P) → ℙ(P)
+𝔼	U+1D53C	prob	EXPECTED	EXPECT(X) → 𝔼[X]
+
+# ============================================================================
+# Fig. 7: Paraconsistent & Non-Classical Operators
+# ============================================================================
+~	U+223C	para	WEAK_NEG	WEAK_NOT(P) → ~P
+⊚	U+229A	relevance	FUSION	FUSION(P,Q) → P ⊚ Q
+*	U+002A	substruct	MULT_CONJ	MULT_AND(P,Q) → P * Q
+!	U+0021	linear	OF_COURSE	REPLICATE(P) → !P
+?	U+003F	linear	WHY_NOT	WEAKEN(P) → ?P
+
+# ============================================================================
+# Fig. 8: Set Theory & Type Theory
+# ============================================================================
+∈	U+2208	set,type	MEMBER	MEMBER(x,S) → x ∈ S
+⊆	U+2286	set	SUBSET	SUBSET(A,B) → A ⊆ B
+∪	U+222A	set	UNION	UNION(A,B) → A ∪ B
+∩	U+2229	set	INTERSECT	INTERSECT(A,B) → A ∩ B
+:	U+003A	type	TYPE_OF	HAS_TYPE(t,T) → t : T
+=	U+003D	type	DEF_EQ	DEF_EQ(a,b) → a = b
+≃	U+2243	hott	HOMOTOPY_EQ	EQUIV(A,B) → A ≃ B
+
+# ============================================================================
+# Fig. 9: Quantum Logic & Computational Semantics
+# ============================================================================
+⊗	U+2297	quantum	TENSOR	TENSOR(A,B) → A ⊗ B
+ℏ	U+210F	quantum	PLANCK	QUANTIZED(E) → ℏω
+∮	U+222E	quantum	PATH_INT	PATH_INT(φ) → ∮Dφ
+
+# ============================================================================
+# Fig. 10: Homotopy Type Theory & Higher Categories
+# ============================================================================
+∞	U+221E	hott,cat	INFINITY	INFTY_GROUPOID(x) → ∞-Grp
+⊢	U+22A2	type	TYPING	TYPES(t,A) → ⊢ t : A
+Π	U+03A0	dep_type	PI_TYPE	PI_TYPE(x:A,B) → Π(x:A)B(x)
+Σ	U+03A3	dep_type	SIGMA_TYPE	SIGMA_TYPE(x:A,B) → Σ(x:A)B(x)
+
+# ============================================================================
+# Fig. 11: Coalgebraic & Behavioral Logic
+# ============================================================================
+∇	U+2207	coalg	NABLA	NABLA(P) → ∇P
+◯	U+25EF	process	COMPOSE	COMPOSE(P,Q) → P ◯ Q
+≈	U+2248	bisim	BISIM_EQ	BISIM(p,q) → p ≈ q
+
+# ============================================================================
+# Fig. 12: Separation Logic & Resource Reasoning
+# ============================================================================
+∗	U+2217	sep	SEP_CONJ	SEP_AND(P,Q) → P ∗ Q
+emp	-	sep	EMPTY_HEAP	EMPTY_HEAP() → emp
+↦	U+21A6	sep	POINTS_TO	POINTS_TO(x,v) → x ↦ v
+
+# ============================================================================
+# Fig. 13: Answer Set Programming & Non-Monotonic Logic
+# ============================================================================
+←	U+2190	asp	RULE_IMP	ASP_RULE(H,B) → H ← B
+not	-	asp	NAF	NAF(P) → not P
+⊨	U+22A8	asp	SATISFIES	STABLE(M,P) → M ⊨ P
+
+# ============================================================================
+# Fig. 14: Category Theory & Topos Logic
+# ============================================================================
+⊣	U+22A3	cat	ADJOINT	ADJOINT(F,G) → F ⊣ G
+≅	U+2245	cat	ISO	ISO(f) → f ≅ g⁻¹
+Ω	U+03A9	topos	CLASSIFIER	CLASSIFIER() → Ω
+
+# ============================================================================
+# Fig. 15: Cubical Type Theory & Computational Logic
+# ============================================================================
+I	U+0049	cubical	INTERVAL	INTERVAL() → I
+i0	-	cubical	LEFT_END	LEFT_END() → i0
+i1	-	cubical	RIGHT_END	RIGHT_END() → i1
+∂	U+2202	cubical	BOUNDARY	BOUNDARY(p) → ∂p

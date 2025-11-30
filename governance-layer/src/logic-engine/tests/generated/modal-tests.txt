@@ -1,0 +1,37 @@
+# Modal Logic Test Cases
+# Format: expression|system|expected_result
+
+# === K AXIOM (all systems) ===
+□(P → Q) → (□P → □Q)|K|VALID
+□(P → Q) → (□P → □Q)|T|VALID
+□(P → Q) → (□P → □Q)|S4|VALID
+□(P → Q) → (□P → □Q)|S5|VALID
+# === T AXIOM (T, S4, S5) ===
+□P → P|K|INVALID
+□P → P|T|VALID
+□P → P|S4|VALID
+□P → P|S5|VALID
+# === 4 AXIOM (S4, S5) ===
+□P → □□P|K|INVALID
+□P → □□P|T|INVALID
+□P → □□P|S4|VALID
+□P → □□P|S5|VALID
+# === 5 AXIOM (S5 only) ===
+◇P → □◇P|K|INVALID
+◇P → □◇P|T|INVALID
+◇P → □◇P|S4|INVALID
+◇P → □◇P|S5|VALID
+# === B AXIOM ===
+P → □◇P|S5|VALID
+# === DUALITY ===
+□P ↔ ¬◇¬P|K|VALID
+◇P ↔ ¬□¬P|K|VALID
+# === D AXIOM ===
+□P → ◇P|K|VALID
+# === DISTRIBUTION ===
+□(P ∧ Q) → (□P ∧ □Q)|K|VALID
+(□P ∧ □Q) → □(P ∧ Q)|K|VALID
+◇(P ∨ Q) ↔ (◇P ∨ ◇Q)|K|VALID
+# === INVALID ===
+□P|K|INVALID
+◇P → □P|K|INVALID

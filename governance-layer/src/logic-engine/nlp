@@ -1,0 +1,264 @@
+#!/bin/bash
+# nlp - Natural Language Processing Layer
+# Figure 26: Enhanced Input Analysis (NLP Component)
+# Patent: Unicode Semantic Dictionary and Multi-Logic Processing Architecture
+#
+# Provides bidirectional translation between natural language and formal logic.
+#
+# MODES:
+#   -i, --input     Natural language → Formal logic (default)
+#   -o, --output    Formal logic → Natural language
+#   -b, --both      Process input as NL, then explain result in NL
+#
+# This enables the Logic Engine to:
+#   1. Accept natural language input from users
+#   2. Explain formal results in natural language
+#   3. Support users with varying technical backgrounds
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DICT_DIR="${SCRIPT_DIR}/dict/nlp"
+
+# ============================================================================
+# TRANSLATION FUNCTIONS
+# ============================================================================
+
+# Natural language to formal logic
+nl_to_formal() {
+    local input="$1"
+
+    if [[ -f "${DICT_DIR}/en-to-formal.sed" ]]; then
+        echo "$input" | sed -f "${DICT_DIR}/en-to-formal.sed"
+    else
+        # Inline fallback
+        echo "$input" | sed \
+            -e 's/\bif \([A-Za-z_]*\) then \([A-Za-z_]*\)/\1 → \2/gi' \
+            -e 's/\([A-Za-z]\) and \([A-Za-z]\)/\1 ∧ \2/gi' \
+            -e 's/\([A-Za-z]\) or \([A-Za-z]\)/\1 ∨ \2/gi' \
+            -e 's/\bnot \([A-Za-z]\)/¬\1/gi' \
+            -e 's/\bit is necessary that \([A-Za-z]\)/□\1/gi' \
+            -e 's/\bit is possible that \([A-Za-z]\)/◇\1/gi' \
+            -e 's/\bmust \([A-Za-z_]*\)/O(\1)/gi' \
+            -e 's/\bmay \([A-Za-z_]*\)/P(\1)/gi' \
+            -e 's/\bmust not \([A-Za-z_]*\)/F(\1)/gi'
+    fi
+}
+
+# Formal logic to natural language
+formal_to_nl() {
+    local input="$1"
+
+    if [[ -f "${DICT_DIR}/formal-to-en.sed" ]]; then
+        echo "$input" | sed -f "${DICT_DIR}/formal-to-en.sed"
+    else
+        # Inline fallback
+        echo "$input" | sed \
+            -e 's/\([A-Za-z]\) → \([A-Za-z]\)/if \1 then \2/g' \
+            -e 's/∧/ and /g' \
+            -e 's/∨/ or /g' \
+            -e 's/¬/not /g' \
+            -e 's/□/necessarily /g' \
+            -e 's/◇/possibly /g' \
+            -e 's/O(\([^)]*\))/it is obligatory that \1/g' \
+            -e 's/P(\([^)]*\))/it is permitted that \1/g' \
+            -e 's/F(\([^)]*\))/it is forbidden that \1/g'
+    fi
+}
+
+# Explain a formal expression in natural language
+explain_expression() {
+    local expr="$1"
+
+    echo "EXPRESSION: $expr"
+    echo ""
+    echo "TRANSLATION:"
+    formal_to_nl "$expr"
+    echo ""
+
+    # Identify components
+    echo "COMPONENTS:"
+
+    # Check for operators and explain
+    if [[ "$expr" =~ → ]]; then
+        echo "  → (implication): 'if... then...'"
+    fi
+    if [[ "$expr" =~ ∧ ]]; then
+        echo "  ∧ (conjunction): 'and'"
+    fi
+    if [[ "$expr" =~ ∨ ]]; then
+        echo "  ∨ (disjunction): 'or'"
+    fi
+    if [[ "$expr" =~ ¬ ]]; then
+        echo "  ¬ (negation): 'not'"
+    fi
+    if [[ "$expr" =~ □ ]]; then
+        echo "  □ (necessity): 'it is necessary that' / 'must be'"
+    fi
+    if [[ "$expr" =~ ◇ ]]; then
+        echo "  ◇ (possibility): 'it is possible that' / 'might be'"
+    fi
+    if echo "$expr" | grep -qE 'O\('; then
+        echo "  O() (obligation): 'must' / 'is required'"
+    fi
+    if echo "$expr" | grep -qE 'P\('; then
+        echo "  P() (permission): 'may' / 'is allowed'"
+    fi
+    if echo "$expr" | grep -qE 'F\('; then
+        echo "  F() (prohibition): 'must not' / 'is forbidden'"
+    fi
+    if [[ "$expr" =~ ⊢ ]]; then
+        echo "  ⊢ (turnstile): 'therefore' / 'it follows that'"
+    fi
+}
+
+# Process natural language, evaluate, and explain result
+process_nl() {
+    local input="$1"
+
+    echo "=== NATURAL LANGUAGE PROCESSING ==="
+    echo ""
+    echo "INPUT (Natural Language):"
+    echo "  $input"
+    echo ""
+
+    # Translate to formal
+    local formal=$(nl_to_formal "$input")
+    echo "FORMAL TRANSLATION:"
+    echo "  $formal"
+    echo ""
+
+    # Evaluate using logic engine
+    if [[ -x "${SCRIPT_DIR}/logic" ]]; then
+        echo "EVALUATION:"
+        local result=$("${SCRIPT_DIR}/logic" "$formal" 2>&1) || true
+        echo "  $result"
+        echo ""
+
+        # Explain result in natural language
+        echo "EXPLANATION:"
+        case "$result" in
+            *TAUTOLOGY*)
+                echo "  This statement is always true (a tautology)."
+                ;;
+            *CONTRADICTION*)
+                echo "  This statement is always false (a contradiction)."
+                ;;
+            *VALID*)
+                echo "  This argument is logically valid - the conclusion follows from the premises."
+                ;;
+            *INVALID*)
+                echo "  This argument is logically invalid - there are cases where the premises are true but the conclusion is false."
+                ;;
+            *SATISFIABLE*)
+                echo "  This statement can be true under some circumstances."
+                ;;
+            *)
+                echo "  $result"
+                ;;
+        esac
+    else
+        echo "EVALUATION: Logic engine not available"
+    fi
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+usage() {
+    cat <<EOF
+NLP Layer - Natural Language Processing for Logic Engine
+
+Usage: $(basename "$0") [OPTIONS] EXPRESSION
+
+OPTIONS:
+    -i, --input      Natural language → Formal logic (default)
+    -o, --output     Formal logic → Natural language
+    -e, --explain    Explain a formal expression
+    -p, --process    Full NL processing (translate, evaluate, explain)
+    -h, --help       Show this help
+
+NATURAL LANGUAGE INPUT EXAMPLES:
+    $(basename "$0") "if P then Q"                    # → P → Q
+    $(basename "$0") "P and Q"                        # → P ∧ Q
+    $(basename "$0") "it is necessary that P"         # → □P
+    $(basename "$0") "must authenticate"              # → O(authenticate)
+    $(basename "$0") "may access"                     # → P(access)
+    $(basename "$0") "must not modify"                # → F(modify)
+
+FORMAL → NATURAL EXAMPLES:
+    $(basename "$0") -o "P → Q"                       # → if P then Q
+    $(basename "$0") -o "□P ∧ O(Q)"                   # → necessarily P and obligatory Q
+
+FULL PROCESSING:
+    $(basename "$0") -p "if user authenticates then may access data"
+
+SUPPORTED PATTERNS:
+    Propositional:  if...then, and, or, not, if and only if
+    Modal:          necessary, possible, must be, might be
+    Deontic:        must, may, must not, allowed, forbidden
+    Epistemic:      knows that, believes that
+    Temporal:       always, eventually, next, until
+    Quantifiers:    for all, there exists
+EOF
+}
+
+main() {
+    local mode="input"
+    local expression=""
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -i|--input)
+                mode="input"
+                shift
+                ;;
+            -o|--output)
+                mode="output"
+                shift
+                ;;
+            -e|--explain)
+                mode="explain"
+                shift
+                ;;
+            -p|--process)
+                mode="process"
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                expression="$1"
+                shift
+                ;;
+        esac
+    done
+
+    if [[ -z "$expression" ]]; then
+        if [[ ! -t 0 ]]; then
+            expression=$(cat)
+        else
+            usage
+            exit 1
+        fi
+    fi
+
+    case "$mode" in
+        input)
+            nl_to_formal "$expression"
+            ;;
+        output)
+            formal_to_nl "$expression"
+            ;;
+        explain)
+            explain_expression "$expression"
+            ;;
+        process)
+            process_nl "$expression"
+            ;;
+    esac
+}
+
+main "$@"

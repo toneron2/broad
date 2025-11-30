@@ -1,0 +1,26 @@
+# Deontic Logic Test Cases
+# Format: expression|expected_result
+
+# === D AXIOM ===
+O(P) → P(P)|VALID
+# === INTER-DEFINITIONS ===
+F(P) ↔ ¬P(P)|VALID
+F(P) ↔ O(¬P)|VALID
+P(P) ↔ ¬O(¬P)|VALID
+# === NO CONFLICTS ===
+¬(O(P) ∧ O(¬P))|VALID
+¬(O(P) ∧ F(P))|VALID
+# === DISTRIBUTION ===
+O(P ∧ Q) → (O(P) ∧ O(Q))|VALID
+(O(P) ∧ O(Q)) → O(P ∧ Q)|VALID
+O(P → Q) → (O(P) → O(Q))|VALID
+# === ROSS'S PARADOX ===
+O(P) → O(P ∨ Q)|VALID
+# === CONTRARY-TO-DUTY ===
+O(P), ¬P, O(¬P → Q) ⊢ O(Q)|VALID
+# === CONFLICTS ===
+O(P) ∧ F(P)|INCONSISTENT
+O(P) ∧ O(¬P)|INCONSISTENT
+# === ACCESS CONTROL ===
+O(auth) → P(access)|VALID
+F(access) → ¬P(access)|VALID

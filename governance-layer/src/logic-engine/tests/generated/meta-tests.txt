@@ -1,0 +1,12 @@
+# Meta-Engine Cross-System Test Cases
+# Format: expression|paradigms|expected
+
+# === MODAL-DEONTIC ===
+□O(P) → O(P)|modal,deontic|VALID
+O(□P) → O(P)|modal,deontic|VALID
+□¬P ∧ O(P)|modal,deontic|CONFLICT
+# === DEONTIC-TEMPORAL ===
+O(G(P)) → G(O(P))|deontic,temporal|CHECK
+# === MODAL-BOOLEAN ===
+□(P ∧ Q) → □P|modal,boolean|VALID
+□P ∧ □Q → □(P ∧ Q)|modal,boolean|VALID

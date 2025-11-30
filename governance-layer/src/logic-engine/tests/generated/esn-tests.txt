@@ -1,0 +1,18 @@
+# ESN Access Control Test Cases
+# Format: policy|request|expected_decision
+
+# === BASIC ACCESS ===
+O(auth) → P(access)|auth|ALLOW
+O(auth) → P(access)|no_auth|DENY
+# === PROHIBITION ===
+F(admin_access)|admin_access|DENY
+# === COMPOUND ===
+O(auth) ∧ O(verify) → P(access)|auth ∧ verify|ALLOW
+O(auth) ∧ O(verify) → P(access)|auth ∧ ¬verify|DENY
+# === TEMPORAL ===
+G(O(log)) → P(access)|continuous_logging|ALLOW
+# === ROLE-BASED ===
+O(role=admin) → P(delete)|admin|ALLOW
+O(role=admin) → P(delete)|user|DENY
+# === CONFLICT DETECTION ===
+O(access) ∧ F(access)|any|CONFLICT

@@ -1,0 +1,252 @@
+#!/bin/bash
+# logic - Main Entry Point for Multi-Logic Processing Engine
+# Figure 26: Adaptive Processing Workflow (General)
+# Patent: Unicode Semantic Dictionary and Multi-Logic Processing Architecture
+#
+# This implements the complete Figure 26 workflow:
+#   1. Enhanced Input Analysis Phase (tokenize, identify)
+#   2. Multi-System Logic Engine Selection (route)
+#   3. Cross-System Validation (validate)
+#   4. Response Generation (output)
+#
+# Usage:
+#   ./logic "expression"              # Evaluate expression
+#   ./logic -e modal "□P → P"         # Force specific engine
+#   ./logic --nlp "if P then Q"       # Natural language input
+#   ./logic --json "P ∧ Q → P"        # JSON output
+
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CORE_DIR="${SCRIPT_DIR}/core"
+ENGINE_DIR="${SCRIPT_DIR}/engines"
+DICT_DIR="${SCRIPT_DIR}/dict"
+
+# ============================================================================
+# VERSION AND HELP
+# ============================================================================
+
+VERSION="1.0.0"
+
+usage() {
+    cat <<EOF
+Logic Engine v${VERSION} - Multi-Paradigm Formal Reasoning
+Patent: Unicode Semantic Dictionary and Multi-Logic Processing Architecture
+
+USAGE:
+    $(basename "$0") [OPTIONS] EXPRESSION
+
+OPTIONS:
+    -e, --engine ENGINE    Force specific engine (boolean, modal, deontic, etc.)
+    -n, --nlp              Enable natural language preprocessing
+    -j, --json             Output in JSON format
+    -t, --table            Show truth table (boolean only)
+    -v, --verbose          Verbose output with paradigm detection
+    -d, --debug            Debug mode with trace
+    -h, --help             Show this help
+
+ENGINES (Figure 26):
+    boolean        Propositional logic (Fig 16)
+    modal          Modal logic K, S4, S5 (Fig 17)
+    deontic        Deontic logic O/P/F (Fig 18)
+    epistemic      Epistemic logic K/B (Fig 19)
+    fuzzy          Fuzzy logic [0,1] (Fig 20)
+    temporal       Temporal logic LTL (Fig 21)
+    paraconsistent Four-valued logic (Fig 22)
+    meta           Cross-paradigm composition (Fig 24)
+
+OPERATORS (Figs 1-15):
+    ¬  NOT        □  NECESSARY   O(P)  OBLIGATORY
+    ∧  AND        ◇  POSSIBLE    P(P)  PERMITTED
+    ∨  OR         ○  NEXT        F(P)  FORBIDDEN
+    →  IMPLIES    ⊢  TURNSTILE   K_a   KNOWS
+    ↔  IFF        ∀  FORALL      B_a   BELIEVES
+    ⊤  TRUE       ∃  EXISTS
+    ⊥  FALSE
+
+EXAMPLES:
+    $(basename "$0") "P ∨ ¬P"                     # Tautology check
+    $(basename "$0") "P, P → Q ⊢ Q"               # Modus ponens
+    $(basename "$0") -e modal "□P → P"            # Modal validity
+    $(basename "$0") --nlp "if P then Q"          # Natural language
+    $(basename "$0") "O(P) ∧ F(P)"                # Deontic contradiction
+
+EOF
+}
+
+# ============================================================================
+# NATURAL LANGUAGE PREPROCESSING
+# ============================================================================
+
+apply_nlp() {
+    local expr="$1"
+
+    if [[ -f "${DICT_DIR}/nlp/en-to-formal.sed" ]]; then
+        echo "$expr" | sed -f "${DICT_DIR}/nlp/en-to-formal.sed"
+    else
+        # Inline NLP patterns
+        echo "$expr" | sed \
+            -e 's/\bif \([^ ,]*\) then \([^ .]*\)/\1 → \2/gi' \
+            -e 's/\bif \([^ ,]*\), then \([^ .]*\)/\1 → \2/gi' \
+            -e 's/\([A-Z]\) and \([A-Z]\)/\1 ∧ \2/gi' \
+            -e 's/\([A-Z]\) or \([A-Z]\)/\1 ∨ \2/gi' \
+            -e 's/\bnot \([A-Z]\)/¬\1/gi' \
+            -e 's/\bit is necessary that \([A-Z]\)/□\1/gi' \
+            -e 's/\bit is possible that \([A-Z]\)/◇\1/gi' \
+            -e 's/\bit is obligatory that \([^ .]*\)/O(\1)/gi' \
+            -e 's/\bit is permitted that \([^ .]*\)/P(\1)/gi' \
+            -e 's/\bit is forbidden that \([^ .]*\)/F(\1)/gi' \
+            -e 's/\([A-Za-z]*\) must \([^ .]*\)/O(\1 → \2)/gi' \
+            -e 's/\([A-Za-z]*\) may \([^ .]*\)/P(\1 → \2)/gi' \
+            -e 's/\([A-Za-z]*\) knows that \([^ .]*\)/K_\1(\2)/gi' \
+            -e 's/\([A-Za-z]*\) believes that \([^ .]*\)/B_\1(\2)/gi'
+    fi
+}
+
+# ============================================================================
+# FIGURE 26 PIPELINE
+# ============================================================================
+
+# Full adaptive processing workflow
+process_expression() {
+    local expr="$1"
+    local forced_engine="${2:-}"
+    local use_nlp="${3:-false}"
+    local verbose="${4:-false}"
+    local json_output="${5:-false}"
+
+    # Phase 0: NLP preprocessing (if enabled)
+    if [[ "$use_nlp" == "true" ]]; then
+        expr=$(apply_nlp "$expr")
+        $verbose && echo "NLP: $expr" >&2
+    fi
+
+    # Phase 1: Enhanced Input Analysis
+    local paradigms
+    paradigms=$("${CORE_DIR}/identify.sh" "$expr" 2>/dev/null | grep '^PARADIGMS:' | cut -d: -f2- || echo "boolean")
+    $verbose && echo "PARADIGMS: $paradigms" >&2
+
+    # Phase 2: Engine Selection
+    local engine="$forced_engine"
+    if [[ -z "$engine" ]]; then
+        engine=$("${CORE_DIR}/identify.sh" "$expr" 2>/dev/null | grep '^PRIMARY:' | cut -d: -f2 || echo "boolean")
+    fi
+    $verbose && echo "ENGINE: $engine" >&2
+
+    # Phase 2-3: Route to engine and validate
+    # Note: engines may return non-zero for INVALID results - this is expected behavior
+    local result
+    case "$engine" in
+        boolean)
+            result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
+            ;;
+        modal)
+            if [[ -x "${ENGINE_DIR}/modal.sh" ]]; then
+                result=$("${ENGINE_DIR}/modal.sh" "$expr" 2>&1) || true
+            else
+                result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
+            fi
+            ;;
+        deontic)
+            if [[ -x "${ENGINE_DIR}/deontic.sh" ]]; then
+                result=$("${ENGINE_DIR}/deontic.sh" "$expr" 2>&1) || true
+            else
+                result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
+            fi
+            ;;
+        meta)
+            if [[ -x "${ENGINE_DIR}/meta.sh" ]]; then
+                result=$("${ENGINE_DIR}/meta.sh" "$expr" "$paradigms" 2>&1) || true
+            else
+                result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
+            fi
+            ;;
+        *)
+            result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
+            ;;
+    esac
+
+    # Phase 4: Response Generation
+    if [[ "$json_output" == "true" ]]; then
+        echo "$result" | "${CORE_DIR}/output.sh" --json --paradigms "$paradigms"
+    else
+        echo "$result"
+    fi
+}
+
+# ============================================================================
+# MAIN
+# ============================================================================
+
+main() {
+    local expression=""
+    local forced_engine=""
+    local use_nlp=false
+    local verbose=false
+    local json_output=false
+    local table_mode=false
+    local debug=false
+
+    # Parse arguments
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -e|--engine)
+                forced_engine="$2"
+                shift 2
+                ;;
+            -n|--nlp)
+                use_nlp=true
+                shift
+                ;;
+            -j|--json)
+                json_output=true
+                shift
+                ;;
+            -t|--table)
+                table_mode=true
+                shift
+                ;;
+            -v|--verbose)
+                verbose=true
+                shift
+                ;;
+            -d|--debug)
+                debug=true
+                set -x
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            --version)
+                echo "Logic Engine v${VERSION}"
+                exit 0
+                ;;
+            *)
+                expression="$1"
+                shift
+                ;;
+        esac
+    done
+
+    # Read from stdin if no expression provided
+    if [[ -z "$expression" ]]; then
+        if [[ ! -t 0 ]]; then
+            expression=$(cat)
+        else
+            usage
+            exit 1
+        fi
+    fi
+
+    # Handle table mode
+    if [[ "$table_mode" == "true" ]]; then
+        "${ENGINE_DIR}/boolean.sh" -t "$expression"
+        exit 0
+    fi
+
+    # Process expression
+    process_expression "$expression" "$forced_engine" "$use_nlp" "$verbose" "$json_output"
+}
+
+main "$@"
