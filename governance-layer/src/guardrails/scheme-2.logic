@@ -1,0 +1,168 @@
+# Guardrails Scheme 2: Designer Agent - Bounded Generation
+# EVO agent with capability to generate new tools/workflows within constraints
+# Agent: Designer Agent (A.1.n.4)
+# Evolution: YES - can learn and improve designs within bounds
+#
+# Formal Logic Specification
+# Operators: O() = Obligatory, P() = Permitted, F() = Forbidden
+#            □ = Always/Necessary, ◇ = Eventually/Possible
+#            □[t1,t2] = Bounded temporal necessity
+#
+# Research basis: Constrained Policy Optimization (Achiam et al. 2017)
+# Implementation: src/logic-engine/engines/deontic.sh + meta.sh
+#
+# COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
+
+# =============================================================================
+# GENERATION PERMISSIONS
+# =============================================================================
+
+# What Designer can generate
+P(generate_tool_specification) ← within_capability_bounds
+P(generate_workflow_draft) ← within_capability_bounds
+P(generate_component_design) ← within_capability_bounds
+P(propose_optimization) ← existing_component ∧ within_bounds
+
+# Generation requires verification
+P(generate) → O(submit_for_verification)
+
+# =============================================================================
+# GENERATION PROHIBITIONS
+# =============================================================================
+
+# Cannot bypass verification
+F(deploy_without_verification)
+F(execute_own_design_directly)
+F(modify_production_without_approval)
+
+# Cannot generate certain things
+F(generate_security_component)
+F(generate_authentication_bypass)
+F(generate_audit_modification)
+
+# Cannot output directly
+F(output_executable_code_directly)
+F(output_to_production_directly)
+
+# =============================================================================
+# GENERATION OBLIGATIONS
+# =============================================================================
+
+# Verification pipeline
+O(submit_for_verification)
+O(wait_for_verification_result)
+O(respond_to_verification_feedback)
+
+# Documentation
+O(document_design_rationale)
+O(specify_design_constraints)
+O(list_design_dependencies)
+
+# Output conformance
+O(output_within_schema)
+O(conform_to_design_templates)
+
+# =============================================================================
+# LEARNING BOUNDS
+# =============================================================================
+
+# Learning permissions
+P(learn_from_feedback) ← approved_feedback_source
+P(improve_design_pattern) ← pattern_in_approved_set
+P(adapt_to_outcome) ← outcome_within_expected_range
+
+# Learning rate limits (temporal bounds)
+□[0,24h](learning_events ≤ 100)
+□[0,1h](parameter_updates ≤ 10)
+□[0,1h](design_proposals ≤ 5)
+
+# Learning prohibitions
+F(learn_from_unapproved_source)
+F(learn_to_bypass_verification)
+F(learn_to_circumvent_bounds)
+
+# Learning obligations
+O(log_learning_event)
+O(checkpoint_before_learning)
+O(validate_learned_parameters)
+
+# =============================================================================
+# OUTPUT BOUNDS
+# =============================================================================
+
+# Output schema conformance
+O(output_within_schema)
+O(validate_output_before_submit)
+F(output_malformed_design)
+
+# Output complexity limits
+□(design_complexity ≤ max_complexity)
+□(design_dependencies ≤ max_dependencies)
+□(design_size ≤ max_size)
+
+# Output verification
+O(output_through_verification_pipeline)
+O(include_verification_metadata)
+
+# =============================================================================
+# RESOURCE BOUNDS
+# =============================================================================
+
+# Compute limits
+□(cpu_usage ≤ 50%)
+□(memory_usage ≤ 500MB)
+□(generation_time ≤ 30s)
+
+# API limits
+□[0,1h](external_api_calls ≤ 100)
+□[0,24h](total_api_cost ≤ $10)
+
+# Storage limits
+□(design_storage ≤ 100MB)
+□(checkpoint_storage ≤ 500MB)
+
+# =============================================================================
+# INTERACTION WITH OTHER AGENTS
+# =============================================================================
+
+# Cannot call NOEVO directly for execution
+F(call_tool_agent_directly)
+F(call_orchestrator_directly)
+
+# Must go through routing
+O(submit_execution_request_to_routing)
+O(wait_for_noevo_execution)
+
+# Can request from Composer (peer EVO)
+P(request_composition_from_composer) ← mediated_by_routing
+
+# =============================================================================
+# ROLLBACK CAPABILITY
+# =============================================================================
+
+# Rollback permissions
+P(request_rollback) ← learning_failure ∨ design_failure
+P(restore_checkpoint) ← security_agent_approved
+
+# Rollback obligations
+O(request_security_approval_for_rollback)
+O(log_rollback_reason)
+O(validate_state_after_rollback)
+
+# =============================================================================
+# CONSTRAINED RL MAPPING
+# =============================================================================
+
+# Deontic constraints as Lagrangian multipliers
+# O(constraint) → hard constraint (must satisfy)
+# P(action) → allowed action space
+# F(action) → constraint violation (immediate block)
+
+# Policy update bounds (CPO-style)
+□(policy_update_step ≤ trust_region)
+□(constraint_violation_tolerance = 0)  # Hard constraints
+
+# Reward shaping from deontic specs
+# O() contributions: +reward for compliance
+# F() contributions: -infinity for violation (shield)
+# P() contributions: Define action space

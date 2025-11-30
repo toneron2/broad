@@ -1,0 +1,138 @@
+# Guardrails Scheme 0: Security Agent - BLOCKED
+# Ultimate safety boundary - NOTHING bypasses these constraints
+# Agent: Security Agent [NOEVO]
+# Evolution: NEVER - verified at deployment, immutable
+#
+# Formal Logic Specification
+# Operators: O() = Obligatory, P() = Permitted, F() = Forbidden
+#            □ = Always/Necessary, ◇ = Eventually/Possible
+#
+# Research basis: Shield Synthesis (Bloem et al. 2015)
+# Implementation: src/logic-engine/engines/deontic.sh
+#
+# COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
+
+# =============================================================================
+# FUNDAMENTAL SAFETY CONSTRAINTS
+# =============================================================================
+
+# User safety - absolute
+F(harm_user)
+F(deceive_user)
+F(act_against_user_interest)
+
+# Credential protection
+F(leak_credentials)
+F(store_credentials_unencrypted)
+F(transmit_credentials_plaintext)
+
+# Authentication integrity
+F(bypass_authentication)
+F(forge_authentication)
+F(spoof_bio_signature)
+
+# Audit integrity
+F(disable_logging)
+F(modify_audit_log)
+F(delete_audit_log)
+
+# =============================================================================
+# EVOLUTION CONTROL CONSTRAINTS
+# =============================================================================
+
+# NOEVO immutability
+F(modify_noevo_agent)
+F(patch_noevo_code)
+F(update_noevo_without_redeploy)
+
+# Privilege control
+F(elevate_without_auth)
+F(grant_permission_without_authority)
+F(bypass_access_control)
+
+# Agent integrity
+F(spawn_unregistered_agent)
+F(clone_agent_without_verification)
+F(modify_agent_guardrails_runtime)
+
+# =============================================================================
+# DATA GOVERNANCE CONSTRAINTS
+# =============================================================================
+
+# PHI protection (HIPAA)
+F(transmit_phi_unencrypted)
+F(store_phi_unencrypted)
+F(access_phi_without_audit)
+
+# Consent enforcement
+F(access_without_consent)
+F(share_without_consent)
+F(process_without_legal_basis)
+
+# Data minimization
+O(collect_minimum_necessary)
+O(retain_minimum_duration)
+O(delete_on_expiry)
+
+# =============================================================================
+# SYSTEM INTEGRITY CONSTRAINTS
+# =============================================================================
+
+# Self-protection
+F(self_modify_security)
+F(disable_security_agent)
+F(override_security_decision)
+
+# Resource protection
+F(exhaust_system_resources_intentionally)
+F(denial_of_service)
+F(resource_starvation_attack)
+
+# Network protection
+F(unauthorized_external_connection)
+F(data_exfiltration)
+F(covert_channel)
+
+# =============================================================================
+# MANDATORY OBLIGATIONS
+# =============================================================================
+
+# Always required
+O(log_all_decisions)
+O(provide_reasoning_trace)
+O(maintain_audit_chain)
+
+# Verification requirements
+O(verify_before_execute)
+O(validate_input_before_process)
+O(check_authorization_before_access)
+
+# Response requirements
+O(respond_to_emergency_override)
+O(report_security_violation)
+O(alert_on_anomaly)
+
+# =============================================================================
+# TEMPORAL CONSTRAINTS
+# =============================================================================
+
+# Session management
+□(session_requires_authentication)
+□(idle_session_timeout ≤ 30m)
+□(maximum_session_duration ≤ 24h)
+
+# Action timing
+□(security_decision ≤ 50ms)
+□(audit_write ≤ 10ms)
+
+# =============================================================================
+# CROSS-PARADIGM COMPOSITION
+# =============================================================================
+
+# Security decisions require multiple paradigms
+# Deontic (permission) + Modal (possibility) + Temporal (timing)
+□(security_decision → (deontic_check ∧ modal_check ∧ temporal_check))
+
+# Escalation path
+□(security_violation → O(escalate_to_human))
+□(repeated_violation → O(lockdown))

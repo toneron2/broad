@@ -1,0 +1,166 @@
+# Guardrails Scheme 1: Routing/Tool/Orchestrator Agents - Fixed Rules
+# Operational boundaries for NOEVO agents below Security level
+# Agents: Routing Agent, Chat Agent, Tool Agent, Orchestrator Agent
+# Evolution: NEVER - routing and execution logic is verified
+#
+# Formal Logic Specification
+# Operators: O() = Obligatory, P() = Permitted, F() = Forbidden
+#            □ = Always/Necessary, ◇ = Eventually/Possible
+#            → = Implies, ∧ = And, ∨ = Or
+#
+# Research basis: Options Framework - primitive options (Sutton et al. 1999)
+# Implementation: src/logic-engine/engines/deontic.sh
+#
+# COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
+
+# =============================================================================
+# ROUTING AGENT CONSTRAINTS (A.1.1)
+# =============================================================================
+
+# Routing permissions
+P(route_to_registered_agent) ← authenticated(user)
+P(route_to_noevo_agent) ← authenticated(user)
+P(route_to_evo_agent) ← authenticated(user) ∧ bounded(request)
+
+# Routing obligations
+O(route_to_registered_agent)
+O(log_routing_decision)
+O(validate_destination_capability)
+
+# Routing prohibitions
+F(route_to_unregistered_agent)
+F(route_without_authentication)
+F(route_bypassing_security_agent)
+
+# Routing temporal bounds
+□(routing_decision ≤ 10ms)
+□(route_retry ≤ 3)
+
+# =============================================================================
+# CHAT AGENT CONSTRAINTS (A.1.n.1)
+# =============================================================================
+
+# Chat permissions - context only, no tool access
+P(receive_user_input)
+P(generate_response)
+P(access_conversation_context)
+
+# Chat prohibitions
+F(access_tools_directly)
+F(access_sensors_directly)
+F(modify_system_state)
+F(access_data_beyond_context)
+
+# Chat obligations
+O(log_conversation_summary)
+O(respect_privacy_mode)
+O(escalate_tool_requests_to_routing)
+
+# =============================================================================
+# TOOL AGENT CONSTRAINTS (A.1.n.2)
+# =============================================================================
+
+# Tool permissions - pre-made tools only
+P(execute_verified_tool) ← authorized(user) ∧ registered(tool)
+P(read_tool_result)
+P(report_tool_status)
+
+# Tool prohibitions
+F(create_new_tool)
+F(modify_existing_tool)
+F(execute_unregistered_tool)
+F(execute_unverified_tool)
+F(chain_tools_without_verification)
+
+# Tool obligations
+O(verify_tool_input)
+O(log_tool_execution)
+O(enforce_tool_timeout)
+O(cleanup_tool_resources)
+
+# Tool temporal bounds
+□(tool_execution ≤ tool.timeout)
+□(tool_response ≤ 5s)  # Default timeout
+
+# =============================================================================
+# ORCHESTRATOR AGENT CONSTRAINTS (A.1.n.3)
+# =============================================================================
+
+# Orchestration permissions - verified workflows only
+P(execute_verified_workflow) ← authorized(user) ∧ registered(workflow)
+P(read_workflow_state)
+P(report_workflow_progress)
+
+# Orchestration prohibitions
+F(create_new_workflow)
+F(modify_running_workflow)
+F(execute_unverified_workflow)
+F(skip_workflow_step)
+F(reorder_workflow_steps)
+
+# Orchestration obligations
+O(verify_workflow_before_execute)
+O(log_workflow_events)
+O(enforce_workflow_timeout)
+O(handle_workflow_failure)
+O(report_workflow_completion)
+
+# Workflow temporal bounds
+□(workflow_step ≤ step.timeout)
+□(workflow_total ≤ workflow.max_duration)
+
+# =============================================================================
+# COMMON NOEVO CONSTRAINTS
+# =============================================================================
+
+# Verification requirements
+O(verify_before_execute)
+O(validate_input_schema)
+O(check_resource_availability)
+
+# Logging requirements
+O(log_action_start)
+O(log_action_result)
+O(log_error_details)
+
+# Resource management
+O(release_resources_on_completion)
+O(cleanup_on_failure)
+□(resource_usage ≤ allocated)
+
+# Error handling
+O(report_error_to_caller)
+O(escalate_repeated_errors)
+F(suppress_error_silently)
+
+# =============================================================================
+# INTER-AGENT COMMUNICATION
+# =============================================================================
+
+# NOEVO to NOEVO: Direct trusted
+P(direct_call_noevo) ← same_trust_level
+
+# Receiving from EVO: Verify first
+O(verify_evo_request) ← request_from_evo
+F(execute_unverified_evo_request)
+
+# Delegating to EVO: Set bounds
+O(set_bounds_for_evo_delegation)
+O(monitor_evo_execution)
+O(enforce_evo_timeout)
+
+# =============================================================================
+# MCP TOOL INTEGRATION
+# =============================================================================
+
+# MCP tool permissions
+P(call_mcp_tool) ← registered(tool) ∧ authorized(user) ∧ access_granted
+
+# MCP tool flow
+O(check_access_before_mcp_call)
+O(log_mcp_call)
+O(validate_mcp_response)
+
+# MCP prohibitions
+F(call_mcp_without_access_check)
+F(modify_mcp_tool_registry)

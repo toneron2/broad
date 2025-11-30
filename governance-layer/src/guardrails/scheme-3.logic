@@ -1,0 +1,205 @@
+# Guardrails Scheme 3: Composer Agent - Bounded Composition
+# EVO agent with capability to combine components into workflows
+# Agent: Composer Agent (A.1.n.5)
+# Evolution: YES - can learn composition patterns within bounds
+#
+# Formal Logic Specification
+# Operators: O() = Obligatory, P() = Permitted, F() = Forbidden
+#            □ = Always/Necessary, ◇ = Eventually/Possible
+#            □[t1,t2] = Bounded temporal necessity
+#
+# Research basis: Hierarchical RL - Options over Options (Sutton et al. 1999)
+# Implementation: src/logic-engine/engines/deontic.sh + meta.sh
+#
+# COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
+
+# =============================================================================
+# COMPOSITION PERMISSIONS
+# =============================================================================
+
+# What Composer can combine
+P(compose_verified_components) ← all_components_verified
+P(compose_verified_workflows) ← all_workflows_verified
+P(compose_approved_patterns) ← pattern_in_approved_library
+
+# Composition requires verification
+P(compose) → O(verify_composition_result)
+
+# Sequential composition
+P(sequence_components) ← components_compatible
+P(chain_workflows) ← workflows_chainable
+
+# Parallel composition
+P(parallelize_independent) ← no_shared_state
+P(fork_join_pattern) ← join_point_defined
+
+# Conditional composition
+P(conditional_branch) ← conditions_decidable
+P(switch_pattern) ← exhaustive_cases
+
+# =============================================================================
+# COMPOSITION PROHIBITIONS
+# =============================================================================
+
+# Cannot use unverified parts
+F(compose_with_unverified_component)
+F(compose_with_unverified_workflow)
+F(include_untrusted_source)
+
+# Cannot create certain compositions
+F(compose_security_bypass)
+F(compose_infinite_loop)
+F(compose_resource_exhaustion)
+
+# Cannot deploy directly
+F(deploy_composition_without_verification)
+F(execute_composition_directly)
+
+# =============================================================================
+# COMPOSITION OBLIGATIONS
+# =============================================================================
+
+# Verification
+O(verify_composition_result)
+O(verify_interface_compatibility)
+O(verify_resource_bounds)
+
+# Documentation
+O(document_composition_structure)
+O(specify_data_flow)
+O(list_composition_constraints)
+
+# Termination guarantee
+O(prove_termination)
+O(define_timeout)
+
+# =============================================================================
+# WORKFLOW BOUNDS
+# =============================================================================
+
+# Complexity limits
+□(workflow_steps ≤ 50)
+□(workflow_depth ≤ 10)
+□(parallel_branches ≤ 5)
+□(conditional_depth ≤ 3)
+
+# Termination requirements
+O(workflow_terminates)
+O(all_paths_terminate)
+F(unbounded_recursion)
+F(unbounded_loop)
+
+# Resource consumption
+□(total_resource_usage ≤ sum(component_limits))
+□(worst_case_time ≤ workflow.max_duration)
+
+# =============================================================================
+# LEARNING BOUNDS
+# =============================================================================
+
+# Learning permissions
+P(learn_composition_pattern) ← pattern_produces_valid_workflow
+P(improve_composition_strategy) ← within_bounds
+P(adapt_to_feedback) ← feedback_from_approved_source
+
+# Learning rate limits
+□[0,24h](pattern_updates ≤ 20)
+□[0,1h](composition_attempts ≤ 10)
+
+# Learning prohibitions
+F(learn_to_bypass_verification)
+F(learn_unbounded_patterns)
+F(learn_from_failed_compositions)  # Unless explicitly allowed
+
+# Learning obligations
+O(log_pattern_learning)
+O(validate_learned_pattern)
+O(checkpoint_before_pattern_change)
+
+# =============================================================================
+# RESOURCE BOUNDS
+# =============================================================================
+
+# Compute limits during composition
+□(composition_cpu ≤ 30%)
+□(composition_memory ≤ 300MB)
+□(composition_time ≤ 60s)
+
+# Composed workflow limits
+□(composed_workflow_cpu ≤ 80%)
+□(composed_workflow_memory ≤ 2GB)
+□(composed_workflow_duration ≤ 1h)
+
+# Storage limits
+□(composition_storage ≤ 50MB)
+□(pattern_library_size ≤ 200MB)
+
+# =============================================================================
+# COMPONENT INTERACTION
+# =============================================================================
+
+# Interface requirements
+O(verify_input_output_compatibility)
+O(verify_type_compatibility)
+O(verify_resource_compatibility)
+
+# Data flow constraints
+O(explicit_data_flow)
+F(implicit_data_sharing)
+F(hidden_state_mutation)
+
+# Error propagation
+O(define_error_handling)
+O(propagate_errors_explicitly)
+F(swallow_errors)
+
+# =============================================================================
+# INTERACTION WITH OTHER AGENTS
+# =============================================================================
+
+# Can receive designs from Designer (peer EVO)
+P(receive_design_from_designer) ← mediated_by_routing
+
+# Cannot call NOEVO directly
+F(call_tool_agent_directly)
+F(call_orchestrator_directly)
+
+# Must submit through routing
+O(submit_composition_to_routing)
+O(wait_for_verification)
+
+# =============================================================================
+# VERIFICATION REQUIREMENTS
+# =============================================================================
+
+# Composition verification checklist
+O(verify_all_components_exist)
+O(verify_all_interfaces_match)
+O(verify_no_resource_conflict)
+O(verify_termination)
+O(verify_within_bounds)
+
+# Verification metadata
+O(include_component_versions)
+O(include_interface_contracts)
+O(include_resource_estimates)
+O(include_termination_proof)
+
+# =============================================================================
+# HIERARCHICAL RL MAPPING
+# =============================================================================
+
+# Options over Options (hierarchical composition)
+# Each verified component = primitive option
+# Each composition = higher-level option
+# Composer = option generator at composition level
+
+# Option termination conditions = workflow completion criteria
+# Option initiation sets = valid starting states
+# Option policies = workflow execution strategy
+
+# Composition as Option Construction:
+# compose(A, B) creates new option:
+#   - initiation: A.initiation
+#   - policy: A.policy then B.policy
+#   - termination: B.termination
