@@ -1,0 +1,15 @@
+# Secrets - NEVER commit
+yt_api_key
+*_api_key
+*.secret
+.env
+
+# Generated outputs (large files)
+production/renders/
+demos/recordings/
+presentations/generated/
+reports/generated/
+
+# OS files
+.DS_Store
+Thumbs.db

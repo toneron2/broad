@@ -1,0 +1,35 @@
+{
+  "folders": [
+    {
+      "name": "Logic Engine",
+      "path": "../governance-layer/src/logic-engine"
+    },
+    {
+      "name": "Guardrails",
+      "path": "../governance-layer/src/guardrails"
+    },
+    {
+      "name": "Press Room",
+      "path": "."
+    }
+  ],
+  "settings": {
+    "workbench.colorTheme": "Default Dark Modern",
+    "editor.fontSize": 16,
+    "terminal.integrated.fontSize": 16,
+    "editor.lineNumbers": "on",
+    "editor.minimap.enabled": false,
+    "workbench.activityBar.location": "top",
+    "workbench.sideBar.location": "left",
+    "window.zoomLevel": 1,
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "files.exclude": {
+      "**/*.o": true,
+      "**/*.pyc": true
+    }
+  },
+  "launch": {
+    "version": "0.2.0",
+    "configurations": []
+  }
+}
