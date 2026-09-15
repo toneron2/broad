@@ -1,5 +1,12 @@
 # BROAD Press Room
 
+> **Where this went, 2026-09.** The press room's subject — recording what BROAD does and
+> how it is built, and turning that into published material — moved out of this repository
+> into a separate video-production project that is not public yet. What is under
+> `press-room/` is the December 2025 state: the Phase 0 and Phase 1 captures and the four
+> demo scripts, which still run against `../governance-layer/src/logic-engine/`. Nothing
+> here is maintained; the phase table below stopped at Phase 1.
+
 **Documentation & Demonstration Hub**
 
 The Press Room captures, organizes, and transforms project artifacts into presentation-ready materials. It serves two goals:
