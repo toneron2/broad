@@ -234,7 +234,7 @@ Request → Heartbeat → Access Agent → Logic Engine → ALLOW/DENY
 | Metric | Target | Achieved | Research Basis |
 |--------|--------|----------|----------------|
 | Access decision | <50ms | ✓ | Runtime Verification |
-| Logic Engine | <50ms | ✓ | Patent claim |
+| Logic Engine | <50ms | ✓ | Specification claim |
 | Paradigm detection | <5ms | ✓ | Regex compilation |
 | Heartbeat rate | 1-50 Hz | ✓ | QUIC protocol |
 | Memory footprint | <5MB | ✓ | Edge deployment |

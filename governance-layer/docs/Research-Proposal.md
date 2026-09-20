@@ -309,7 +309,7 @@ Deploy to 2-3 NGO partners for real-world validation
 - **Design + Philosophy background:** User experience + formal reasoning
 - **19 years B2B integration:** Governance patterns, formal semantics, multi-party coordination
 - **Comprehensive architecture specs:** Detailed technical documentation
-- **Provisional patent:** Logic Engine and core innovations (USPTO provisional filed)
+- **Logic Engine specification:** dated (September 2025) and registered with the US Copyright Office; no patent application has been filed
 
 ### What I Need
 
@@ -431,7 +431,7 @@ Go/no-go on Phase 0 implementation based on validation results.
 - ESN as Neuro-Symbolic Architecture.md (Research positioning)
 - Critical-Technical-Unknowns.md (Hardware feasibility concerns)
 
-**Available on request:** Full architecture documents, provisional patent summary
+**Available on request:** Full architecture documents, Logic Engine specification
 
 ---
 

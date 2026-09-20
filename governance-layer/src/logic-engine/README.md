@@ -1,8 +1,8 @@
 # Logic Engine - Multi-Paradigm Formal Reasoning
 
-**Patent: Unicode Semantic Dictionary and Multi-Logic Processing Architecture**
+**Specification: Unicode Semantic Dictionary and Multi-Logic Processing Architecture** (September 2025, registered with the US Copyright Office; no patent has been filed)
 
-This implementation demonstrates that the patented Logic Engine architecture (Figure 26) can be built using only Unix primitives (bash, awk, sed, regex), achieving extreme compactness for edge device deployment.
+This implementation demonstrates that the specified Logic Engine architecture (Figure 26) can be built using only Unix primitives (bash, awk, sed, regex), achieving extreme compactness for edge device deployment.
 
 ## Architecture Overview
 
@@ -140,7 +140,7 @@ The Logic Engine powers the ESN Access Agent for:
 ./tests/run-tests.sh deontic
 ```
 
-## Patent Claims Demonstrated
+## Specification Claims Demonstrated
 
 1. **Unicode Semantic Dictionary** (Figs 1-15): `dict/operators.tsv`
 2. **Modular Logic Engines** (Figs 16-22): `engines/`
