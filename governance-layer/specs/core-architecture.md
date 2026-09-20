@@ -1546,7 +1546,7 @@ decision = LogicEngine.synthesize(
 - [ ] **Probabilistic Logic** (Bayesian reasoning, uncertainty)
 - [ ] **Abductive Logic** (best explanation)
 - [ ] **Causal Logic** (cause-effect chains)
-- [ ] Additional paradigms per patent specification
+- [ ] Additional paradigms per the Logic Engine specification
 
 ### Synthesis Engine
 - [ ] Implement paradigm weighting mechanism
@@ -1562,8 +1562,8 @@ decision = LogicEngine.synthesize(
 - [ ] Audit logs include paradigm information
 - [ ] User explanations are comprehensible
 
-### Validation Against Patent Claims
-- [ ] <35ms validation time (per patent claim)
+### Validation Against the Specification's Claims
+- [ ] <35ms validation time (per the specification)
 - [ ] 18+ logic paradigms operational
 - [ ] Unicode dictionary correctly maps concepts
 - [ ] Multi-paradigm synthesis produces correct results

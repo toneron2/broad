@@ -112,7 +112,7 @@ Added Reasoning Layer component (Python/Kotlin, custom implementation)
 ## Key Design Decisions
 
 ### 1. **Reasoning Layer is Architectural, Not Optional**
-The Logic Engine patent isn't a plugin - it's how the system reasons about everything. By making it architectural from the start, we avoid:
+The Logic Engine isn't a plugin - it's how the system reasons about everything. By making it architectural from the start, we avoid:
 - Building a generic system (not novel)
 - Creating technical debt (refactoring later)
 - Missing governance guarantees (trust issues)
@@ -185,7 +185,7 @@ Benefits:
 ### Team Building
 When talking to potential collaborators, you can now explain:
 - **What exists:** Bare-bones infrastructure with governance
-- **What's unique:** Multi-paradigm reasoning (patent-pending)
+- **What's unique:** Multi-paradigm reasoning (specified September 2025; no patent filed)
 - **What's proven:** Phase 0 with simple rules
 - **What's coming:** Phase 1 with full Logic Engine
 
@@ -200,7 +200,7 @@ When talking to potential collaborators, you can now explain:
 "Every decision the system makes is governed by explicit rules. You can see why the camera was denied, why data stayed on the device, or why a task ran locally. The system earns trust through transparency."
 
 ### For Investors
-"The Logic Engine patent is architecturally integrated from day one. We prove the governance model in Phase 0 with simple rules, then unlock the full multi-paradigm advantage in Phase 1. This isn't a feature - it's the foundation."
+"The Logic Engine is architecturally integrated from day one. We prove the governance model in Phase 0 with simple rules, then unlock the full multi-paradigm advantage in Phase 1. This isn't a feature - it's the foundation."
 
 ---
 
@@ -221,7 +221,7 @@ Before considering bare-bones complete, verify:
 - [ ] Interface is stable and well-documented
 - [ ] Phase 0 implementation can be swapped out
 - [ ] Migration checklist is actionable
-- [ ] Patent claims map to implementation plan
+- [ ] The specification's claims map to implementation plan
 
 ---
 
@@ -254,7 +254,7 @@ When recruiting developers or talking to partners, these questions help validate
 - Provides governance from day one (trust foundation)
 - Maintains original scope (bare-bones still bare-bones)
 
-**The key insight:** By defining the reasoning *interface* now and implementing it simply in Phase 0, you establish governance as a first-class architectural concern while proving the patent-pending Logic Engine can be integrated seamlessly in Phase 1.
+**The key insight:** By defining the reasoning *interface* now and implementing it simply in Phase 0, you establish governance as a first-class architectural concern while proving the Logic Engine can be integrated seamlessly in Phase 1.
 
 **You're ready to execute.** The Bare-Bones Spec now defines everything needed to build a trustworthy, governable, evolvable edge-cloud agentic system that will serve vulnerable populations through NGO partnerships.
 

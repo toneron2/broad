@@ -125,9 +125,9 @@ esn-project/
 │   │
 │   ├── 06-legal/
 │   │   ├── README.md
-│   │   ├── patent-summary.md (Key claims from provisional)
+│   │   ├── patent-summary.md (Key claims from the draft application)
 │   │   ├── patent-filing-timeline.md
-│   │   ├── DRAFT-Patent-Application.pdf (current provisional)
+│   │   ├── DRAFT-Patent-Application.pdf (draft, never filed)
 │   │   ├── ip-strategy.md (What to patent, what to open-source)
 │   │   └── licensing-approach.md
 │   │
@@ -428,9 +428,9 @@ See [images/](images/) for diagrams:
 
 ```markdown
 # ESN Patent Summary
-## Key Claims from Provisional Application
+## Key Claims from the Draft Application (not filed)
 
-**Provisional Filing Date:** [Date]
+**Filing Date:** none
 **Application Number:** [Number]
 **Inventors:** Tony [Last Name]
 
@@ -452,11 +452,11 @@ See [images/](images/) for diagrams:
 
 ### Claim 4: Bio-Authenticated Continuous Trust
 
-[If included in provisional]
+[If included in the draft]
 
 ### Claim 5: NOEVO/EVO Capability Separation
 
-[If included in provisional]
+[If included in the draft]
 
 ---
 

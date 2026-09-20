@@ -2,7 +2,7 @@
 
 ## Logic Engine - Figure 26 Implementation
 
-**Patent**: Unicode Semantic Dictionary and Multi-Logic Processing Architecture
+**Specification**: Unicode Semantic Dictionary and Multi-Logic Processing Architecture (September 2025; no patent filed)
 **Status**: Working Proof-of-Concept
 **Created**: 2025-11-29
 
@@ -10,7 +10,7 @@
 
 ## What This Is
 
-This directory contains a **working implementation** of the patent's Figure 26 (Adaptive Processing Workflow) built entirely with Unix primitives (bash, awk, sed, regex). It proves the patent's architecture can run on minimal hardware with extreme compactness.
+This directory contains a **working implementation** of the specification's Figure 26 (Adaptive Processing Workflow) built entirely with Unix primitives (bash, awk, sed, regex). It proves the specified architecture can run on minimal hardware with extreme compactness.
 
 **Key Achievement**: Multi-paradigm formal logic reasoning in ~4,300 lines of shell scripts.
 
@@ -160,7 +160,7 @@ This engine powers the ESN Access Agent:
 
 ## Important Notes
 
-- This is a **proof-of-concept** demonstrating patent feasibility
+- This is a **proof-of-concept** demonstrating the specification's feasibility
 - Complex biconditional expressions need parser improvements
 - Edge cases in Unicode handling are known
 - The meta-engine is the key innovation (agentic composition)
