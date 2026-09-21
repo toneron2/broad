@@ -1,9 +1,13 @@
 # The ESN specifications, and what came after them
 
 The six documents in this directory are the Emergent Synergy Nexus design as written in
-October and November 2025. **They are kept byte-for-byte as first published here** (five
-arrived with the repository on 2025-11-22; `evo-noevo-hierarchy.md` followed on 2025-11-30),
-because a specification that keeps being edited in place stops being a record of anything.
+October and November 2025 (five arrived with the repository on 2025-11-22;
+`evo-noevo-hierarchy.md` followed on 2025-11-30). **Their substance is kept as first
+published**, because a specification that keeps being edited in place stops being a record
+of anything. Two kinds of edit have been made since, both on 2026-09-20 and both visible in
+the history: sentences that called the Logic Engine specification a filed or pending patent
+were corrected (it is copyright-registered; no patent has been filed), and two promotional
+phrases were removed. Nothing technical changed.
 
 The design did not stop in November 2025. The 2026 architecture that grew out of it uses
 one name for each thing where these documents use two, and moves some pieces. Rather than

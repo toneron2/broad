@@ -92,7 +92,7 @@ esn/
 ├── .claude/              # Claude Code configuration
 ├── docs/                 # User-facing documentation (simplified)
 ├── specs/                # Technical specifications (detailed)
-├── patents/              # Patent documents
+├── patents/              # The Logic Engine specification (copyright-registered; no patent filed)
 ├── src/                  # Source code (Phase 1+)
 ├── tests/                # Test suites (Phase 1+)
 ├── scripts/              # Build automation

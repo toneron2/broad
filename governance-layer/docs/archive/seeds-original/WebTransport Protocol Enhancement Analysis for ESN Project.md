@@ -613,7 +613,7 @@ WebTransport becomes the foundational transport for all ESN deployments, enablin
 * Efficient community resource sharing  
 * Privacy-preserving collaborative workflows
 
-This positions ESN as a leading example of next-generation multi-agent architectures leveraging modern web protocols for social impact.
+ESN uses these protocol features for edge-cloud agent coordination.
 
 ---
 

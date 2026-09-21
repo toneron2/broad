@@ -4,7 +4,7 @@ This document provides guidance to Claude Code when working in the ESN Governanc
 
 ---
 
-## Project Status: ACTIVE DEVELOPMENT
+## Project status: specification and partial implementation (dormant since February 2026; the engine continues as URGE)
 
 The governance layer is **operational** with working code and formal specifications:
 
@@ -45,10 +45,10 @@ governance-layer/
 │   ├── logic-engine.md           # Logic Engine specification
 │   ├── protocols.md              # Communication protocols
 │   └── hardware.md               # Hardware requirements
-├── docs/
-│   └── research/
+├── docs/archive/
+│   └── 2025-planning/research/
 │       └── L5A-AGENTIC-RESEARCH-FRAMEWORK.md  # Research mappings
-├── patents/                      # Patent documents
+├── patents/                      # The Logic Engine specification (copyright-registered; no patent filed)
 └── tests/                        # Integration tests
 ```
 
@@ -130,7 +130,7 @@ F(modify_noevo_agent)
 
 ## Research Mappings
 
-The architecture maps to cutting-edge research:
+The architecture maps to current research:
 
 | ESN Component | Research Domain | Key Papers |
 |---------------|-----------------|------------|
@@ -141,7 +141,7 @@ The architecture maps to cutting-edge research:
 | Deontic constraints | Formal Synthesis | Shield Synthesis (Bloem 2015) |
 | Edge governance | Neuromorphic | Loihi 2, Akida |
 
-**Full mapping**: `docs/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md`
+**Full mapping**: `docs/archive/2025-planning/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md`
 
 ---
 
@@ -269,7 +269,7 @@ Request → Heartbeat → Access Agent → Logic Engine → ALLOW/DENY
 | `src/access_agent.py` | Governance gateway implementation |
 | `src/logic-engine/core/identify.sh` | Paradigm detection (key innovation) |
 | `src/logic-engine/engines/deontic.sh` | Deontic logic evaluation |
-| `docs/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md` | Research context |
+| `docs/archive/2025-planning/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md` | Research context |
 
 ---
 

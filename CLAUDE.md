@@ -43,11 +43,11 @@ broad/
 │   │   ├── evo-noevo-hierarchy.md   # Agent classification
 │   │   ├── core-architecture.md
 │   │   └── agent-roles.md
-│   └── docs/research/
+│   └── docs/archive/2025-planning/research/
 │       └── L5A-AGENTIC-RESEARCH-FRAMEWORK.md
 │
-└── healthcare-workflow-library/      # Healthcare Vertical (COMPLETE)
-    ├── standards/                    # FHIR, BPMN, CMMN, DMN, GS1
+└── healthcare-workflow-library/      # Healthcare vertical: two FHIR mappings, one BPMN pathway, one n8n template
+    ├── standards/                    # FHIR mappings, one BPMN pathway
     ├── converters/                   # BPMN → n8n converters
     ├── n8n-workflows/                # Executable workflow templates
     └── mcp-server/                   # Healthcare MCP server
@@ -64,7 +64,7 @@ broad/
 | Heartbeat Protocol | Working | `governance-layer/src/heartbeat.py` |
 | Guardrails Schemes | Defined | `governance-layer/src/guardrails/` |
 | EVO/NOEVO Hierarchy | Specified | `governance-layer/specs/evo-noevo-hierarchy.md` |
-| Healthcare Workflows | Complete | `healthcare-workflow-library/` |
+| Healthcare Workflows | Four artefacts (two FHIR mappings, one BPMN pathway, one n8n template); MCP server does not run | `healthcare-workflow-library/` |
 | MCP Servers | Planned | Design in `DECISIONS.md` |
 | Terraform | Planned | Next sequence |
 
@@ -94,7 +94,7 @@ A. Security Agent       [NOEVO] - Guardrails Scheme 0 (BLOCKED)
 
 ## Research Foundation
 
-Architecture maps to cutting-edge research:
+Architecture maps to current research:
 
 | Component | Research Domain | Key Work |
 |-----------|-----------------|----------|
@@ -104,7 +104,7 @@ Architecture maps to cutting-edge research:
 | Agent hierarchy | Hierarchical RL | Options Framework (Sutton 1999) |
 | Deontic constraints | Formal Synthesis | Bloem et al. 2015 |
 
-**Full mapping**: `governance-layer/docs/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md`
+**Full mapping**: `governance-layer/docs/archive/2025-planning/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md`
 
 ---
 
