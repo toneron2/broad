@@ -19,9 +19,9 @@ src/
 └── shared/              # Shared libraries (future)
 ```
 
-## Status: ACTIVE DEVELOPMENT
+## Status: working, dormant since February 2026 (superseded by URGE)
 
-The governance layer is now operational with:
+The governance layer runs with:
 
 1. **Logic Engine** - Working multi-paradigm formal reasoning (~4,300 lines)
 2. **Access Agent** - Governance gateway calling Logic Engine for decisions

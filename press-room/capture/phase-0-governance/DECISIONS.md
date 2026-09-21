@@ -172,7 +172,7 @@ The architecture was developed organically. Question: Does it align with current
 | Deontic constraints | Formal Synthesis | Bloem et al. 2015 |
 
 ### Implementation
-`governance-layer/docs/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md`
+`governance-layer/docs/archive/2025-planning/research/L5A-AGENTIC-RESEARCH-FRAMEWORK.md`
 
 ### Value
 - Academic credibility for presentations

@@ -200,7 +200,7 @@ When talking to potential collaborators, you can now explain:
 "Every decision the system makes is governed by explicit rules. You can see why the camera was denied, why data stayed on the device, or why a task ran locally. The system earns trust through transparency."
 
 ### For Investors
-"The Logic Engine is architecturally integrated from day one. We prove the governance model in Phase 0 with simple rules, then unlock the full multi-paradigm advantage in Phase 1. This isn't a feature - it's the foundation."
+"The Logic Engine is architecturally integrated from day one. We prove the governance model in Phase 0 with simple rules, then add the full multi-paradigm evaluation in Phase 1. This isn't a feature - it's the foundation."
 
 ---
 

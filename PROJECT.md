@@ -1,145 +1,73 @@
-# BROAD: Business Resource Observability and Automation Deployment
+# BROAD in one page
 
-**With ESN Governance Layer Integrated**
+**Business Resource Observability and Automation Deployment: an agentic ERP in which every
+agent action passes a formal governance check, with healthcare as the demonstration
+vertical.** In the 2026 architecture BROAD is the first service behind the portal igent.me;
+the governance layer here is the 2025 form of what became [URGE](https://github.com/toneron2/URGE).
+The [README](README.md) carries the name mapping.
 
-## Project Status: ACTIVE DEVELOPMENT
+| | |
+|---|---|
+| **Status** | Specification and partial implementation. |
+| **Organisation** | TODOMODO.IO AGENCY LLC · Anthony R. Slosar |
+| **Written** | November 2025 – February 2026 |
+| **Runs** | shell logic engine · access agent (57 tests) · heartbeat session manager (Python) |
+| **Designed, not built** | MCP servers · Terraform for GKE · the workflow library beyond its four artefacts |
 
-This is the **PRIMARY repository** for the unified BROAD + ESN platform. All other repositories (ESN, ESN0, etc.) are deprecated.
-
-## What This Is
-
-A **self-governing, self-observing enterprise platform** that demonstrates:
-1. **Agentic ERP**: AI agents managing enterprise operations
-2. **Formal Governance**: Multi-paradigm Logic Engine for access control
-3. **Healthcare Vertical**: Complex use case with FHIR, BPMN, UDS+, GS1
-4. **Full Observability**: See how the system functions, not just that it functions
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    USER INTERFACE                            │
-│          (Voice / Natural Language / Bio-Auth)               │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────┐
-│              ESN GOVERNANCE LAYER                            │
-│  • QUIC Heartbeat (device registration/session)              │
-│  • Access Agent (Triple-Lock: bio + OAuth2 + Logic)          │
-│  • Logic Engine (Boolean, Modal, Deontic, Meta)              │
-│  [WORKING: governance-layer/src/]                            │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────┐
-│                     BROAD PLATFORM                           │
-│  • MCP Servers (9 domains)                                   │
-│  • ERPNext + n8n                                             │
-│  • Databases, Redis, Observability                           │
-│  • GKE Infrastructure                                        │
-└───────────────────────────┬─────────────────────────────────┘
-                            │
-┌───────────────────────────▼─────────────────────────────────┐
-│              HEALTHCARE WORKFLOW LAYER                       │
-│  FHIR R4 │ BPMN Clinical Pathways │ UDS+ │ GS1 │ SNOMED     │
-│  [COMPLETE: healthcare-workflow-library/]                    │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Repository Structure
+## Layers
 
 ```
-broad/
-├── EXECUTION.md                    # Active execution plan (START HERE)
-├── PROJECT.md                      # This file
-├── governance-layer/               # ESN Governance (WORKING)
-│   ├── src/
-│   │   ├── access_agent.py        # Governance gateway
-│   │   ├── heartbeat.py           # QUIC session management
-│   │   └── logic-engine/          # Multi-paradigm reasoning
-│   ├── specs/                     # Technical specifications
-│   └── patents/                   # Patent documents
-├── healthcare-workflow-library/    # Healthcare vertical (COMPLETE)
-│   ├── standards/                 # FHIR, BPMN, UDS+, GS1
-│   ├── mcp-server/               # Healthcare MCP tools
-│   └── n8n-workflows/            # Workflow templates
-└── archive/                       # Deprecated files
+ User interface        voice · natural language · bio-authentication
+ ──────────────────────────────────────────────────────────────────────
+ Governance layer      heartbeat session · access agent · logic engine    [runs: governance-layer/src/]
+ ──────────────────────────────────────────────────────────────────────
+ Platform              ERPNext · n8n · MCP servers by domain · MariaDB, Redis · OpenTelemetry stack · GKE
+ ──────────────────────────────────────────────────────────────────────
+ Healthcare workflows  FHIR R4 mappings · BPMN pathways · (designed: CMMN, DMN, UDS+, GS1)
 ```
 
-## Core Components
+## Components
 
-| Component | Status | Location |
-|-----------|--------|----------|
-| Logic Engine | WORKING | `governance-layer/src/logic-engine/` |
-| Access Agent | WORKING | `governance-layer/src/access_agent.py` |
-| Heartbeat Protocol | WORKING | `governance-layer/src/heartbeat.py` |
-| Healthcare Library | COMPLETE | `healthcare-workflow-library/` |
-| Terraform Modules | PENDING | Next sequence |
-| GKE Deployment | PENDING | Next sequence |
-
-## Key Decisions Made
-
-| Decision | Choice |
-|----------|--------|
-| ESN Integration | NOW (governance from start) |
-| Use Case | Demonstration + Healthcare + Generic ERP |
-| Hardware Path | Cloud → Orange Pi → Pixel |
-| Phase 0 Reasoning | Logic Engine (working) |
-| Observability | 100% → Intelligent Sampling |
-| Deployment | Configurable (chunked default) |
-
-## Quick Verification
+| Component | State | Where |
+|---|---|---|
+| Logic engine: boolean, modal (Kripke), deontic (O/P/F), meta | working | `governance-layer/src/logic-engine/` |
+| Access agent: the governance gateway | working | `governance-layer/src/access_agent.py` |
+| Heartbeat: session and authentication state | working in Python, no QUIC | `governance-layer/src/heartbeat.py` |
+| Healthcare workflow library | one BPMN pathway, two FHIR mappings, one n8n template, an MCP server file that does not run | `healthcare-workflow-library/` |
+| Terraform modules, GKE deployment | not started | — |
 
 ```bash
-# Test Logic Engine
-cd governance-layer/src/logic-engine
-./logic "P ∨ ¬P"                    # → TAUTOLOGY
-./logic "O(auth) → P(access)"       # → VALID
-
-# Test Access Agent
-cd governance-layer/src
-python3 access_agent.py
-
-# Test Heartbeat
-python3 heartbeat.py
+cd governance-layer/src/logic-engine && ./logic "P ∨ ¬P"        # TAUTOLOGY
+./logic "O(auth) → P(access)"                                    # VALID
+cd .. && python3 test_governance.py                              # 57 passed
 ```
 
-## Next Sequence
+## Decisions that shape it
 
-See `EXECUTION.md` for detailed sequence. Next up:
-1. Create Terraform modules (infrastructure layer)
-2. Deploy GKE cluster
-3. Deploy databases and observability
-4. Deploy ERPNext + n8n with governance hooks
+| Question | Decision |
+|---|---|
+| When does governance enter | from the first deployment, not as a later layer |
+| Reasoning in phase 0 | the shell logic engine as it is; no separate validation phase |
+| Hardware path | cloud simulation → Orange Pi 5 → Pixel (AOSP) |
+| Use case | a community health centre: FHIR R4, UDS+ reporting, clinical pathways |
+| Observability | 100 % tracing first, sampled later |
+| Deployment | configurable; chunked by default |
 
-## Technology Stack
+The full register is [`DECISIONS.md`](DECISIONS.md); the sequence is [`EXECUTION.md`](EXECUTION.md).
 
-### Governance Layer (ESN)
-- **Logic Engine**: Multi-paradigm formal reasoning (bash/awk/sed)
-- **Paradigms**: Boolean, Modal (Kripke), Deontic (O/P/F), Meta
-- **Protocol**: QUIC-based heartbeat
-- **Target**: <50ms access decisions
+## Stack
 
-### Platform Layer (BROAD)
-- **ERP**: ERPNext (full deployment)
-- **Workflows**: n8n orchestration
-- **Infrastructure**: GKE + Terraform
-- **Database**: Self-hosted MariaDB
-- **Cache**: Self-hosted Redis
-- **Observability**: OpenTelemetry + Prometheus + Grafana
-
-### Healthcare Layer
-- **Clinical Data**: FHIR R4 (HAPI FHIR server)
-- **Pathways**: BPMN 2.0 clinical workflows
-- **Reporting**: UDS+ federal compliance
-- **Supply Chain**: GS1 (24 hospital processes)
-- **Terminology**: SNOMED, LOINC, RxNorm
+| Layer | Choice |
+|---|---|
+| Governance | logic engine in bash/awk/sed; target under 50 ms per decision; heartbeat over QUIC |
+| ERP | ERPNext, full deployment |
+| Workflows | n8n |
+| Infrastructure | GKE via Terraform; MariaDB and Redis self-hosted |
+| Observability | OpenTelemetry, Prometheus, Grafana |
+| Clinical data | FHIR R4 (HAPI); BPMN 2.0 pathways; SNOMED, LOINC, RxNorm |
 
 ## Contact
 
-- **Organization**: TODOMODO.IO Agency LLC
-- **Lead**: Anthony R. Slosar
-- **Telegram**: [@toneron2](https://t.me/toneron2)
+Tony Slosar · TODOMODO.IO AGENCY LLC · anthonyslosar@gmail.com · [t.me/toneron2](https://t.me/toneron2) · [slosars.me](https://slosars.me)
 
-## Copyright
-
-COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
+Copyright 2025–2026 TODOMODO.IO AGENCY LLC. All rights reserved.
