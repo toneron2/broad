@@ -13,10 +13,12 @@ prepared from it.
 | `logic-engine-patent.pdf`, and the same specification under its full title | *Unicode Semantic Dictionary and Multi-Logic Processing Architecture for Modular Reasoning Systems*, 14 pages, September 2025 (two copies, contact details redacted 2026-09-20) | Registered with the US Copyright Office as a literary work, 2025-09-28. Public in this repository since 2025-11-23. |
 | `DRAFT Patent Application Input Document.pdf` (in `docs/archive/seeds-original/`) | Draft application text, October 2025 | Draft. Never filed. |
 
-**No patent application has been filed.** Earlier revisions of this file, and of documents
-elsewhere in this repository, described a provisional patent as filed or pending; that was
-wrong, and the wording was corrected on 2026-09-20. The registration above is a copyright
-registration of the text.
+**Patent pending.** The architecture this specification belongs to, the Unicode Semantic
+Dictionary and the logic engines included, is the subject of United States provisional
+patent application 64/161,805, filed 2026-09-24. The September 2025 document itself was
+registered as a copyright, not filed as a patent application; earlier revisions of this
+file, and of documents elsewhere in this repository, described a provisional as filed in
+2025, which was wrong and was corrected on 2026-09-20.
 
 ## Where the design is implemented
 

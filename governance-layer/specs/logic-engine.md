@@ -185,7 +185,7 @@ Benefits:
 ### Team Building
 When talking to potential collaborators, you can now explain:
 - **What exists:** Bare-bones infrastructure with governance
-- **What's unique:** Multi-paradigm reasoning (specified September 2025; no patent filed)
+- **What's unique:** Multi-paradigm reasoning (specified September 2025; patent pending)
 - **What's proven:** Phase 0 with simple rules
 - **What's coming:** Phase 1 with full Logic Engine
 

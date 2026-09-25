@@ -77,6 +77,8 @@ F(harm_user)   F(bypass_authentication)   F(disable_logging)   F(modify_noevo_ag
 | Heartbeat session manager (`governance-layer/src/heartbeat.py`) | Working in Python; no QUIC transport under it |
 | Guardrail schemes 0–3 | Defined |
 | EVO / NOEVO hierarchy | Specified |
+| W0 heartbeat establishment ([`workflows/`](workflows/)) | Designed as a governed workflow: five gates, each evaluated through URGE. Procurement in process |
+| W1 sensing the locale ([`workflows/`](workflows/)) | Designed as a governed workflow: six gates, FHIR R4 `Device` and `Observation`. Procurement in process |
 | Healthcare workflow library | Started: one BPMN clinical pathway (patient admission), two FHIR R4 mappings (Patient, Encounter), one n8n sync template, an MCP server skeleton. The design names CMMN, DMN and GS1 as well; those are not yet in the repository |
 | MCP servers | Designed, not built |
 | Deployment | Terraform for GKE, not deployed; the 2026 target is Cloud Run |
@@ -109,7 +111,7 @@ The first device built to that contract is
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Five design principles and the system layers (2025; GKE where the target is now Cloud Run) |
 | [`ESN_BROAD_INTEGRATION.md`](ESN_BROAD_INTEGRATION.md) | How governance and BROAD meet; the protocol stack above |
 | [`governance-layer/specs/`](governance-layer/specs/) | The ESN specifications, October–November 2025, with a forward note per spec in their [README](governance-layer/specs/README.md) |
-| [`governance-layer/patents/`](governance-layer/patents/) | The Logic Engine specification (September 2025, copyright-registered; no patent filed) |
+| [`governance-layer/patents/`](governance-layer/patents/) | The Logic Engine specification (September 2025, copyright-registered). The architecture is the subject of United States provisional patent application 64/161,805, filed 2026-09-24: patent pending |
 | [`DECISIONS.md`](DECISIONS.md) | Each architectural decision with its reasoning |
 | [`EXECUTION.md`](EXECUTION.md) | The build sequence |
 | [`HEALTHCARE_WORKFLOW_LIBRARY_SUMMARY.md`](HEALTHCARE_WORKFLOW_LIBRARY_SUMMARY.md) | What the workflow library was designed to hold |

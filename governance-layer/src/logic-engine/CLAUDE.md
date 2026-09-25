@@ -2,7 +2,7 @@
 
 ## Logic Engine - Figure 26 Implementation
 
-**Specification**: Unicode Semantic Dictionary and Multi-Logic Processing Architecture (September 2025; no patent filed)
+**Specification**: Unicode Semantic Dictionary and Multi-Logic Processing Architecture (September 2025; patent pending)
 **Status**: Working Proof-of-Concept
 **Created**: 2025-11-29
 
