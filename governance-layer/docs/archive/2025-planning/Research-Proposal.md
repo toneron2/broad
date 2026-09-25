@@ -309,7 +309,7 @@ Deploy to 2-3 NGO partners for real-world validation
 - **Design + Philosophy background:** User experience + formal reasoning
 - **19 years B2B integration:** Governance patterns, formal semantics, multi-party coordination
 - **Comprehensive architecture specs:** Detailed technical documentation
-- **Logic Engine specification:** dated (September 2025) and registered with the US Copyright Office; no patent application has been filed
+- **Logic Engine specification:** dated (September 2025) and registered with the US Copyright Office; patent pending
 
 ### What I Need
 

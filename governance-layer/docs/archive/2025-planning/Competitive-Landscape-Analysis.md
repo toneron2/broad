@@ -365,7 +365,7 @@ Access Agent enforces BEFORE any data leaves device
 **Defensibility:** Not easily replicated. Design + Philosophy + Integration background is rare.
 
 ### 2. The Logic Engine specification
-**Moat:** The multi-paradigm Logic Engine and Unicode Semantic Dictionary are specified in a dated document (September 2025), registered with the US Copyright Office as a literary work. No patent application has been filed.
+**Moat:** The multi-paradigm Logic Engine and Unicode Semantic Dictionary are specified in a dated document (September 2025), registered with the US Copyright Office as a literary work. Patent pending.
 
 **Defensibility:** Dated publication establishes the record of the design.
 

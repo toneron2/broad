@@ -6,7 +6,7 @@ October and November 2025 (five arrived with the repository on 2025-11-22;
 published**, because a specification that keeps being edited in place stops being a record
 of anything. Two kinds of edit have been made since, both on 2026-09-20 and both visible in
 the history: sentences that called the Logic Engine specification a filed or pending patent
-were corrected (it is copyright-registered; no patent has been filed), and two promotional
+were corrected (it is copyright-registered; the provisional application followed in 2026, see [`patents/`](../patents/)), and two promotional
 phrases were removed. Nothing technical changed.
 
 The design did not stop in November 2025. The 2026 architecture that grew out of it uses

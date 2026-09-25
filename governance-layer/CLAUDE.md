@@ -48,7 +48,7 @@ governance-layer/
 ├── docs/archive/
 │   └── 2025-planning/research/
 │       └── L5A-AGENTIC-RESEARCH-FRAMEWORK.md  # Research mappings
-├── patents/                      # The Logic Engine specification (copyright-registered; no patent filed)
+├── patents/                      # The Logic Engine specification (copyright-registered; patent pending)
 └── tests/                        # Integration tests
 ```
 

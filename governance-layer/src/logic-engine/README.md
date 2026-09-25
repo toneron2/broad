@@ -1,6 +1,6 @@
 # Logic Engine - Multi-Paradigm Formal Reasoning
 
-**Specification: Unicode Semantic Dictionary and Multi-Logic Processing Architecture** (September 2025, registered with the US Copyright Office; no patent has been filed)
+**Specification: Unicode Semantic Dictionary and Multi-Logic Processing Architecture** (September 2025, registered with the US Copyright Office; patent pending)
 
 This implementation demonstrates that the specified Logic Engine architecture (Figure 26) can be built using only Unix primitives (bash, awk, sed, regex), achieving extreme compactness for edge device deployment.
 
