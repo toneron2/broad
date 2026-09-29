@@ -98,7 +98,6 @@ esn/
 ├── scripts/              # Build automation
 ├── config/               # Configuration files
 ├── README.md            # Main introduction
-├── CLAUDE.md            # Claude Code AI instructions
 ├── CONTRIBUTING.md      # Contribution guidelines
 └── WORKFLOW.md          # This file
 ```

@@ -57,6 +57,6 @@ cd .. && python3 test_governance.py # 57 passed
 
 | | |
 |---|---|
-| [`CLAUDE.md`](CLAUDE.md), [`WORKFLOW.md`](WORKFLOW.md), [`CONTRIBUTING.md`](CONTRIBUTING.md) | working conventions |
+| [`WORKFLOW.md`](WORKFLOW.md), [`CONTRIBUTING.md`](CONTRIBUTING.md) | working conventions |
 | [`config/`](config/), [`scripts/`](scripts/), [`tests/`](tests/) | placeholders with a README each |
 | [`docs/archive/`](docs/archive/) | seeds as first written, the 2025 planning and outreach documents, GPG and backup setup logs |
