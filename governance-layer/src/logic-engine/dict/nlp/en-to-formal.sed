@@ -13,6 +13,16 @@
 # PROPOSITIONAL CONNECTIVES
 # ============================================================================
 
+# Rule order matters: sed applies every rule in sequence, so a phrase must
+# be rewritten before any shorter phrase it contains. "if and only if" goes
+# before "and", and the prohibition forms "must not"/"shall not" go before
+# "not" and "must".
+
+# Biconditional patterns
+s/\([A-Za-z_][A-Za-z0-9_]*\) if and only if \([A-Za-z_][A-Za-z0-9_]*\)/\1 ↔ \2/gi
+s/\([A-Za-z_][A-Za-z0-9_]*\) iff \([A-Za-z_][A-Za-z0-9_]*\)/\1 ↔ \2/gi
+s/\([A-Za-z_][A-Za-z0-9_]*\) is equivalent to \([A-Za-z_][A-Za-z0-9_]*\)/\1 ↔ \2/gi
+
 # Implication patterns
 s/\bif \([A-Za-z_][A-Za-z0-9_]*\) then \([A-Za-z_][A-Za-z0-9_]*\)/\1 → \2/gi
 s/\bif \([A-Za-z_][A-Za-z0-9_]*\), then \([A-Za-z_][A-Za-z0-9_]*\)/\1 → \2/gi
@@ -28,15 +38,14 @@ s/\bboth \([A-Za-z_][A-Za-z0-9_]*\) and \([A-Za-z_][A-Za-z0-9_]*\)/\1 ∧ \2/gi
 s/\([A-Za-z_][A-Za-z0-9_]*\) or \([A-Za-z_][A-Za-z0-9_]*\)/\1 ∨ \2/gi
 s/\beither \([A-Za-z_][A-Za-z0-9_]*\) or \([A-Za-z_][A-Za-z0-9_]*\)/\1 ∨ \2/gi
 
+# Prohibition (before negation: "must not X" is F(X), not "must ¬X")
+s/\bmust not \([A-Za-z_][A-Za-z0-9_]*\)/F(\1)/gi
+s/\bshall not \([A-Za-z_][A-Za-z0-9_]*\)/F(\1)/gi
+
 # Negation patterns
 s/\bnot \([A-Za-z_][A-Za-z0-9_]*\)/¬\1/gi
 s/\bit is not the case that \([A-Za-z_][A-Za-z0-9_]*\)/¬\1/gi
 s/\bit is false that \([A-Za-z_][A-Za-z0-9_]*\)/¬\1/gi
-
-# Biconditional patterns
-s/\([A-Za-z_][A-Za-z0-9_]*\) if and only if \([A-Za-z_][A-Za-z0-9_]*\)/\1 ↔ \2/gi
-s/\([A-Za-z_][A-Za-z0-9_]*\) iff \([A-Za-z_][A-Za-z0-9_]*\)/\1 ↔ \2/gi
-s/\([A-Za-z_][A-Za-z0-9_]*\) is equivalent to \([A-Za-z_][A-Za-z0-9_]*\)/\1 ↔ \2/gi
 
 # Constants
 s/\btrue\b/⊤/gi
@@ -87,8 +96,6 @@ s/\ballowed to \([A-Za-z_][A-Za-z0-9_]*\)/P(\1)/gi
 s/\bit is forbidden that \([A-Za-z_][A-Za-z0-9_]*\)/F(\1)/gi
 s/\b\([A-Za-z_][A-Za-z0-9_]*\) is forbidden/F(\1)/gi
 s/\b\([A-Za-z_][A-Za-z0-9_]*\) is prohibited/F(\1)/gi
-s/\bmust not \([A-Za-z_][A-Za-z0-9_]*\)/F(\1)/gi
-s/\bshall not \([A-Za-z_][A-Za-z0-9_]*\)/F(\1)/gi
 s/\bprohibited from \([A-Za-z_][A-Za-z0-9_]*\)/F(\1)/gi
 
 # ============================================================================

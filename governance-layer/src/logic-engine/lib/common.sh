@@ -3,6 +3,14 @@
 # Figure 26: Adaptive Processing Workflow - Common Functions
 # Patent: Unicode Semantic Dictionary and Multi-Logic Processing Architecture
 
+# The engines match multi-byte Unicode operators with bracket expressions
+# ([□◇], [∀∃] ...). In a non-UTF-8 locale bash matches those byte by byte,
+# so ¬ and ∨ (which share lead bytes with □ and ∀) are misclassified and a
+# plain propositional formula is routed to the modal engine. Pin the locale.
+if [[ -z "${LC_ALL:-}" || "${LC_ALL}" != *UTF-8* && "${LC_ALL}" != *utf8* ]]; then
+    export LC_ALL=C.UTF-8
+fi
+
 # Engine directory
 ENGINE_DIR="$(dirname "${BASH_SOURCE[0]}")/../engines"
 DICT_DIR="$(dirname "${BASH_SOURCE[0]}")/../dict"
@@ -90,11 +98,14 @@ detect_paradigms() {
 # EXPRESSION PARSING UTILITIES
 # ============================================================================
 
-# Extract atomic propositions from expression
+# Extract atomic propositions from a propositional expression.
+# An atom is any identifier: a single letter (P, Q) or a policy term such as
+# auth, session or role=admin. Operator letters that are followed by "(" in
+# the modal/deontic engines never reach this function because those engines
+# project their operators away first.
 extract_atoms() {
     local expr="$1"
-    # Match single uppercase letters not followed by ( or _
-    echo "$expr" | grep -oE '\b[A-Z]\b' | sort -u | tr '\n' ' '
+    echo "$expr" | grep -oE '\b[A-Za-z_][A-Za-z0-9_=]*\b' | sort -u | tr '\n' ' '
 }
 
 # Count variables in expression
@@ -106,6 +117,71 @@ count_vars() {
 # Normalize whitespace
 normalize() {
     echo "$1" | tr -s '[:space:]' ' ' | sed 's/^ *//;s/ *$//'
+}
+
+# ============================================================================
+# STRUCTURAL PARSING HELPERS (shared by the modal and deontic evaluators)
+# ============================================================================
+# These are pure bash (no subshells): the evaluators call them once per
+# sub-expression per world per valuation, so a $(...) here dominates runtime.
+
+# Trim leading/trailing whitespace. Sets TRIMMED.
+trim_ws() {
+    local e="$1"
+    e="${e#"${e%%[![:space:]]*}"}"
+    e="${e%"${e##*[![:space:]]}"}"
+    TRIMMED="$e"
+}
+
+# Remove parentheses that enclose the whole expression, repeatedly.
+# "(P ∧ Q)" -> "P ∧ Q" but "(P) ∧ (Q)" is left alone. Sets STRIPPED.
+strip_outer_parens() {
+    local e="$1" i n depth closes_at_end
+    trim_ws "$e"; e="$TRIMMED"
+    while [[ "$e" == \(* && "$e" == *\) ]]; do
+        n=${#e}; depth=0; closes_at_end=1
+        for ((i = 0; i < n; i++)); do
+            case "${e:i:1}" in
+                '(') depth=$((depth + 1)) ;;
+                ')') depth=$((depth - 1))
+                     if ((depth == 0 && i < n - 1)); then closes_at_end=0; break; fi ;;
+            esac
+        done
+        ((closes_at_end)) || break
+        e="${e:1:n-2}"
+        trim_ws "$e"; e="$TRIMMED"
+    done
+    STRIPPED="$e"
+}
+
+# Split at the first top-level (paren depth 0) occurrence of a one-character
+# operator. Sets SPLIT_LEFT and SPLIT_RIGHT; returns 1 if the operator does
+# not occur at depth 0. Splitting at the first occurrence makes → right
+# associative; ∧, ∨ and ↔ are associative so the position does not matter.
+split_top_level() {
+    local e="$1" op="$2" i n=${#1} depth=0 c
+    for ((i = 0; i < n; i++)); do
+        c="${e:i:1}"
+        if [[ "$c" == "(" ]]; then depth=$((depth + 1))
+        elif [[ "$c" == ")" ]]; then depth=$((depth - 1))
+        elif [[ "$c" == "$op" && $depth -eq 0 ]]; then
+            SPLIT_LEFT="${e:0:i}"
+            SPLIT_RIGHT="${e:i+1}"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Read "world:atom=val" out of a valuation string without grep. Sets ATOM_VAL
+# (0 when the pair is absent).
+lookup_valuation() {
+    local world="$1" atom="$2" valuation="$3"
+    if [[ " $valuation " == *" $world:$atom=1 "* ]]; then
+        ATOM_VAL=1
+    else
+        ATOM_VAL=0
+    fi
 }
 
 # ============================================================================

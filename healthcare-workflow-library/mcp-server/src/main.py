@@ -389,5 +389,10 @@ async def main():
     )
 
 
-if __name__ == "__main__":
+def run():
+    """Synchronous console-script entry point (see pyproject.toml)."""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    run()

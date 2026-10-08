@@ -58,6 +58,25 @@ TRANSLATION_MATRIX["epistemic:modal:B"]="◇"    # Belief → Possibility (weake
 # PARADIGM DECOMPOSITION
 # ============================================================================
 
+# Project a multi-paradigm expression onto its propositional skeleton for
+# the boolean engine: drop □ ◇ and replace the deontic operators by their
+# operand, keeping parentheses balanced. "□O(P) → P(Q)" becomes "(P) → (Q)".
+boolean_projection() {
+    echo "$1" | sed -E 's/[□◇]//g; s/\b[OPF]\(/(/g'
+}
+
+# Projection for the modal engine: keep □ ◇, read each deontic claim as its
+# propositional content. "□O(P) → P(Q)" becomes "□(P) → (Q)".
+modal_projection() {
+    echo "$1" | sed -E 's/\b[OPF]\(/(/g'
+}
+
+# Projection for the deontic engine: read □X / ◇X as X (the Figure 25
+# idealisation, □ ↔ O). "□O(P) → O(P)" becomes "O(P) → O(P)".
+deontic_projection() {
+    echo "$1" | sed -E 's/[□◇]//g'
+}
+
 # Identify which paradigms are present in an expression
 detect_paradigms() {
     local expr="$1"
@@ -114,7 +133,7 @@ decompose_expression() {
         case "$p" in
             boolean)
                 # Base propositional structure
-                local bool_expr=$(echo "$expr" | sed 's/□//g;s/◇//g;s/O(//g;s/P(//g;s/F(//g;s/)//g')
+                local bool_expr=$(boolean_projection "$expr")
                 echo "BOOLEAN:$bool_expr"
                 ;;
             modal)
@@ -203,7 +222,7 @@ evaluate_multiparadigm() {
         case "$p" in
             boolean)
                 if [[ -x "${ENGINE_DIR}/boolean.sh" ]]; then
-                    local bool_result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
+                    local bool_result=$("${ENGINE_DIR}/boolean.sh" "$(boolean_projection "$expr")" 2>&1) || true
                     results="$results\nBOOLEAN: $bool_result"
                     if [[ -z "$primary_result" ]]; then
                         primary_result="$bool_result"
@@ -212,14 +231,14 @@ evaluate_multiparadigm() {
                 ;;
             modal)
                 if [[ -x "${ENGINE_DIR}/modal.sh" ]]; then
-                    local modal_result=$("${ENGINE_DIR}/modal.sh" "$expr" 2>&1) || true
+                    local modal_result=$("${ENGINE_DIR}/modal.sh" "$(modal_projection "$expr")" 2>&1) || true
                     results="$results\nMODAL: $modal_result"
                     primary_result="$modal_result"
                 fi
                 ;;
             deontic)
                 if [[ -x "${ENGINE_DIR}/deontic.sh" ]]; then
-                    local deontic_result=$("${ENGINE_DIR}/deontic.sh" "$expr" 2>&1) || true
+                    local deontic_result=$("${ENGINE_DIR}/deontic.sh" "$(deontic_projection "$expr")" 2>&1) || true
                     results="$results\nDEONTIC: $deontic_result"
                     primary_result="$deontic_result"
                 fi

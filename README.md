@@ -8,7 +8,7 @@ reasoning behind each decision is recorded rather than inferred.
 |---|---|
 | **Status** | Specification and partial implementation. |
 | **Written** | October 2025 – February 2026 |
-| **Runs today** | The shell logic engine, the access agent and its 57 tests, the heartbeat session manager (Python, no transport) |
+| **Runs today** | The shell logic engine (118 tests), the access agent and heartbeat session manager (Python, 99 tests, no transport) |
 | **Does not run** | MCP servers, Terraform deployment, the workflow library's n8n template, the portal |
 | **Successor** | [URGE](https://github.com/toneron2/URGE): the production form of the logic engine, Rust, on crates.io |
 | **Licence** | Copyright 2025–2026 TODOMODO.IO AGENCY LLC. Published to be read; no licence granted. See [`LICENSE`](LICENSE) |
@@ -45,9 +45,10 @@ The request is classified into the logic paradigms it involves by pattern matchi
 language model, then evaluated in each and returned as a verdict with its derivation.
 
 ```console
-$ ./logic "P ∨ ¬P"                    # TAUTOLOGY
-$ ./logic "O(auth) → P(access)"       # VALID          (deontic)
-$ ./logic "□P → P"                    # T-AXIOM        (modal, reflexivity)
+$ ./logic "P ∨ ¬P"                         # TAUTOLOGY
+$ ./logic "O(P) → P(P)"                    # VALID          (deontic, ought implies can)
+$ ./logic -s T "□P → P"                    # VALID in T     (modal, reflexive frames; INVALID in K)
+$ ./engines/deontic.sh -t "O(x) ∧ F(x)"    # INCONSISTENT
 $ ./core/identify.sh "□O(auth) → P(access)"
 PRIMARY:deontic
 PARADIGMS:boolean modal deontic
@@ -55,7 +56,10 @@ PARADIGMS:boolean modal deontic
 
 These run today against `governance-layer/src/logic-engine/`: four engines, about 4,700
 lines of shell, awk and sed. It is a proof of correctness, not of speed; the sub-50 ms
-target belongs to URGE.
+target belongs to URGE. A policy such as `(O(auth) ∧ O(role=nurse)) → P(read)` is not a
+theorem, so the Security Agent asks the engine whether the policy is *consistent* across
+paradigms and takes the request's facts (authenticated, role, consent, session) from the
+request itself; authentication is required for every ALLOW.
 
 **Agents are classified by whether they may change.** A **NOEVO** agent is fixed after
 deployment and formally verifiable. An **EVO** agent may adapt within guardrails but cannot
@@ -72,8 +76,8 @@ F(harm_user)   F(bypass_authentication)   F(disable_logging)   F(modify_noevo_ag
 
 | Component | State |
 |---|---|
-| Logic Engine (shell) | Working. Dormant since February 2026; superseded by URGE |
-| Security Agent (`governance-layer/src/access_agent.py`) | Working; `test_governance.py` passes 57 of 57 |
+| Logic Engine (shell) | Working for propositional, modal (K, D, T, S4, S5 over frames of 2–3 worlds) and standard deontic logic; `tests/run-tests.sh` passes 118, skips 17 manual checks. Dormant since February 2026; superseded by URGE |
+| Security Agent (`governance-layer/src/access_agent.py`) | Working; `test_governance.py` passes 99 of 99 |
 | Heartbeat session manager (`governance-layer/src/heartbeat.py`) | Working in Python; no QUIC transport under it |
 | Guardrail schemes 0–3 | Defined |
 | EVO / NOEVO hierarchy | Specified |

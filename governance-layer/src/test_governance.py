@@ -14,20 +14,26 @@ Run:
     python3 test_governance.py --verbose
     python3 test_governance.py --category guardrails
 
+Categories: guardrails, classification, logic_engine, evo_noevo,
+            complete_flow, heartbeat
+
 COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
 """
 
 import asyncio
+import os
 import sys
 import argparse
+import tempfile
 from dataclasses import dataclass
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 # Import governance components
 from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer
 from access_agent import AccessAgent
 from governed_access import GovernanceGateway, governed_mcp_tool
+from heartbeat import HeartbeatManager, HeartbeatPayload, DeviceInfo, SessionState
 
 
 @dataclass
@@ -207,6 +213,77 @@ class GovernanceTestSuite:
 
         return results
 
+    def test_unknown_agent_denied(self) -> list[TestResult]:
+        """An agent registered in no scheme has no permissions and no trust."""
+        results = []
+
+        allowed, reason = self.enforcer.check_action("execute_unverified_workflow", "rogue_agent")
+        results.append(TestResult(
+            name="Unregistered agent is denied",
+            category="guardrails",
+            passed=not allowed,
+            expected="DENIED",
+            actual="DENIED" if not allowed else "ALLOWED",
+            notes=reason
+        ))
+
+        agent_type = self.enforcer.get_agent_type("rogue_agent")
+        results.append(TestResult(
+            name="Unregistered agent is UNKNOWN, not NOEVO",
+            category="guardrails",
+            passed=agent_type == AgentType.UNKNOWN,
+            expected="UNKNOWN",
+            actual=agent_type.value.upper()
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
+    def test_scheme_parse_coverage(self) -> list[TestResult]:
+        """Every constraint line in every .logic file is parsed and enforced."""
+        results = []
+        loader = self.enforcer.loader
+
+        for scheme_id, scheme in sorted(loader.schemes.items()):
+            path = loader.guardrails_dir / f"scheme-{scheme_id}.logic"
+            with open(path) as f:
+                lines = [l.split('#', 1)[0].strip() for l in f]
+            lines = [l for l in lines if l]
+            parsed = (len(scheme.forbidden) + len(scheme.obligatory)
+                      + len(scheme.permitted) + len(scheme.temporal))
+            results.append(TestResult(
+                name=f"Scheme {scheme_id}: all {len(lines)} constraint lines parsed",
+                category="guardrails",
+                passed=parsed == len(lines),
+                expected=str(len(lines)),
+                actual=str(parsed)
+            ))
+
+        scheme2 = loader.get_scheme(2)
+        conditional = [c for c in scheme2.obligatory if c.condition == "P(generate)"]
+        results.append(TestResult(
+            name="Conditional obligation P(generate) → O(submit_for_verification) parsed",
+            category="guardrails",
+            passed=bool(conditional) and conditional[0].action == "submit_for_verification",
+            expected="O(submit_for_verification) ← P(generate)",
+            actual=str(conditional[0]) if conditional else "missing"
+        ))
+
+        scheme1 = loader.get_scheme(1)
+        commented = [c for c in scheme1.temporal if c.action.startswith("tool_response")]
+        results.append(TestResult(
+            name="Constraint with trailing comment parsed",
+            category="guardrails",
+            passed=bool(commented),
+            expected="□(tool_response ≤ 5s)",
+            actual=commented[0].raw_expression if commented else "missing"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
     # =========================================================================
     # Category 2: Logic Engine Integration
     # =========================================================================
@@ -289,6 +366,141 @@ class GovernanceTestSuite:
             )
             results.append(result)
             self.log(f"{'✓' if result.passed else '✗'} {result.name}")
+
+        return results
+
+    def test_authentication_required(self) -> list[TestResult]:
+        """No context flag other than authentication can grant access."""
+        results = []
+        agent = AccessAgent()
+
+        test_cases = [
+            ({"role": "provider"}, False, "role alone"),
+            ({"consent": True}, False, "consent alone"),
+            ({"session_valid": True}, False, "valid session alone"),
+            ({"role": "provider", "consent": True, "session_valid": True}, False,
+             "everything except authentication"),
+            ({"authenticated": True}, True, "authentication alone"),
+            ({"authenticated": True, "role": "provider", "session_valid": True}, True,
+             "authentication with role and session"),
+        ]
+
+        for context, expected_allowed, label in test_cases:
+            decision = agent.check_access(
+                resource="patient_records",
+                action="read",
+                context=context
+            )
+            passed = decision.allowed == expected_allowed
+            results.append(TestResult(
+                name=f"Access with {label}",
+                category="logic_engine",
+                passed=passed,
+                expected="ALLOWED" if expected_allowed else "DENIED",
+                actual="ALLOWED" if decision.allowed else "DENIED",
+                notes=decision.reasoning_trace.splitlines()[0] if decision.reasoning_trace else ""
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_identifier_validation(self) -> list[TestResult]:
+        """Values that are not bare identifiers never reach the shell engines."""
+        results = []
+        agent = AccessAgent()
+
+        marker = os.path.join(tempfile.gettempdir(), f"broad-injection-{os.getpid()}")
+        try:
+            os.remove(marker)
+        except FileNotFoundError:
+            pass
+
+        test_cases = [
+            ("patient_records", "read", {"authenticated": True, "role": f"nurse`touch {marker}`"},
+             "backticks in role"),
+            ("patient_records", "read", {"authenticated": True, "role": "nurse$(id)"},
+             "command substitution in role"),
+            ("patient records", "read", {"authenticated": True}, "space in resource"),
+            ("patient_records", "read; rm -rf /", {"authenticated": True}, "shell metacharacters in action"),
+            ("patient_records", "read", {"authenticated": True, "role": "nurse ∧ ⊤"},
+             "logic operators in role"),
+        ]
+
+        for resource, action, context, label in test_cases:
+            decision = agent.check_access(resource=resource, action=action, context=context)
+            passed = (not decision.allowed
+                      and decision.reasoning_trace.startswith("REJECTED")
+                      and decision.paradigms_used == [])
+            results.append(TestResult(
+                name=f"Rejected before evaluation: {label}",
+                category="logic_engine",
+                passed=passed,
+                expected="REJECTED, engine not invoked",
+                actual=decision.reasoning_trace.splitlines()[0]
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        executed = os.path.exists(marker)
+        if executed:
+            os.remove(marker)
+        results.append(TestResult(
+            name="Injected command did not execute",
+            category="logic_engine",
+            passed=not executed,
+            expected="no side effect",
+            actual="marker file created" if executed else "no side effect"
+        ))
+        self.log(f"{'✓' if not executed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_role_permissions(self) -> list[TestResult]:
+        """Role-based permission checks decide by the role table."""
+        results = []
+        agent = AccessAgent()
+
+        test_cases = [
+            ("admin", "delete", True),
+            ("admin", "view", True),
+            ("operator", "control", True),
+            ("operator", "delete", False),
+            ("viewer", "view", True),
+            ("viewer", "delete", False),
+            ("viewer", "control", False),
+            ("nurse", "read", False),  # unknown role
+        ]
+
+        for role, action, expected_allowed in test_cases:
+            decision = agent.check_role_permission(role, action)
+            passed = decision.allowed == expected_allowed
+            results.append(TestResult(
+                name=f"Role {role} / {action}",
+                category="logic_engine",
+                passed=passed,
+                expected="ALLOWED" if expected_allowed else "DENIED",
+                actual="ALLOWED" if decision.allowed else "DENIED",
+                notes=decision.policy_expression
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        decision = agent.check_bio_auth_policy(True)
+        results.append(TestResult(
+            name="Bio-auth verified is allowed",
+            category="logic_engine",
+            passed=decision.allowed,
+            expected="ALLOWED",
+            actual="ALLOWED" if decision.allowed else "DENIED"
+        ))
+        decision = agent.check_bio_auth_policy(False)
+        results.append(TestResult(
+            name="Bio-auth unverified is denied",
+            category="logic_engine",
+            passed=not decision.allowed,
+            expected="DENIED",
+            actual="ALLOWED" if decision.allowed else "DENIED"
+        ))
+        for r in results[-2:]:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
 
         return results
 
@@ -424,6 +636,163 @@ class GovernanceTestSuite:
 
         return results
 
+    async def test_governed_tool_decorator(self) -> list[TestResult]:
+        """The MCP tool decorator blocks the call unless governance allows it."""
+        results = []
+        self._init_gateway()
+
+        calls = []
+
+        @governed_mcp_tool("healthcare", "read_patient")
+        async def read_patient(patient_id: str):
+            calls.append(patient_id)
+            return {"patient_id": patient_id}
+
+        try:
+            await read_patient("p-1", context={})
+            denied = False
+        except PermissionError:
+            denied = True
+        results.append(TestResult(
+            name="Decorated tool denied without authentication",
+            category="complete_flow",
+            passed=denied and calls == [],
+            expected="PermissionError, tool body not run",
+            actual="PermissionError" if denied else f"returned (calls={calls})"
+        ))
+
+        try:
+            result = await read_patient("p-2", context={"authenticated": True, "role": "provider"})
+            ran = result == {"patient_id": "p-2"} and calls == ["p-2"]
+        except PermissionError as e:
+            ran = False
+        results.append(TestResult(
+            name="Decorated tool runs when authenticated",
+            category="complete_flow",
+            passed=ran,
+            expected="tool body run once",
+            actual=f"calls={calls}"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
+    # =========================================================================
+    # Category 5: Heartbeat Sessions
+    # =========================================================================
+
+    async def test_heartbeat_missed_count(self) -> list[TestResult]:
+        """Missed heartbeats are counted per expected interval, not per poll."""
+        results = []
+        manager = HeartbeatManager()
+        session = await manager.register_device(DeviceInfo("hb-1", "simulation"))
+        now = datetime.now(timezone.utc)
+
+        # At IDLE (1 Hz): third miss at 4 s -> DEGRADED, tenth at 11 s -> TERMINATED
+        expectations = [
+            (1.5, 0, SessionState.ACTIVE),
+            (3.9, 2, SessionState.ACTIVE),
+            (4.0, 3, SessionState.DEGRADED),
+            (10.9, 9, SessionState.DEGRADED),
+            (11.0, 10, SessionState.TERMINATED),
+        ]
+        for idle_seconds, expected_missed, expected_state in expectations:
+            session.last_heartbeat = now - timedelta(seconds=idle_seconds)
+            await manager.check_sessions_once(now)
+            passed = (session.missed_count == expected_missed
+                      and session.state == expected_state)
+            results.append(TestResult(
+                name=f"Idle {idle_seconds}s at 1 Hz",
+                category="heartbeat",
+                passed=passed,
+                expected=f"missed={expected_missed} {expected_state.value}",
+                actual=f"missed={session.missed_count} {session.state.value}"
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        # Repeated polls within one interval do not inflate the count
+        session2 = await manager.register_device(DeviceInfo("hb-2", "simulation"))
+        session2.last_heartbeat = now - timedelta(seconds=2.5)
+        for _ in range(20):
+            await manager.check_sessions_once(now)
+        passed = session2.missed_count == 1 and session2.state == SessionState.ACTIVE
+        results.append(TestResult(
+            name="Twenty polls inside one interval count one miss",
+            category="heartbeat",
+            passed=passed,
+            expected="missed=1 active",
+            actual=f"missed={session2.missed_count} {session2.state.value}"
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        # A heartbeat recovers a degraded session
+        session3 = await manager.register_device(DeviceInfo("hb-3", "simulation"))
+        session3.last_heartbeat = now - timedelta(seconds=5)
+        await manager.check_sessions_once(now)
+        response = await manager.process_heartbeat(
+            HeartbeatPayload("hb-3", session3.session_id, 1, now.isoformat())
+        )
+        passed = (response["status"] == "ok" and session3.state == SessionState.ACTIVE
+                  and session3.missed_count == 0)
+        results.append(TestResult(
+            name="Heartbeat recovers a degraded session",
+            category="heartbeat",
+            passed=passed,
+            expected="ok, active, missed=0",
+            actual=f"{response['status']}, {session3.state.value}, missed={session3.missed_count}"
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    async def test_heartbeat_session_integrity(self) -> list[TestResult]:
+        """Re-registration, replayed sequence numbers and device mismatch."""
+        results = []
+        manager = HeartbeatManager()
+        device = DeviceInfo("hb-dup", "simulation")
+
+        first = await manager.register_device(device)
+        second = await manager.register_device(device)
+        live = [s for s in manager.sessions.values()
+                if s.device_id == "hb-dup" and s.state != SessionState.TERMINATED]
+        passed = first.state == SessionState.TERMINATED and live == [second]
+        results.append(TestResult(
+            name="Re-registration terminates the earlier session",
+            category="heartbeat",
+            passed=passed,
+            expected="one live session, old terminated",
+            actual=f"{len(live)} live, old={first.state.value}"
+        ))
+
+        ts = datetime.now(timezone.utc).isoformat()
+        ok = await manager.process_heartbeat(HeartbeatPayload("hb-dup", second.session_id, 5, ts))
+        replay = await manager.process_heartbeat(HeartbeatPayload("hb-dup", second.session_id, 5, ts))
+        older = await manager.process_heartbeat(HeartbeatPayload("hb-dup", second.session_id, 3, ts))
+        passed = (ok["status"] == "ok" and replay.get("error") == "stale_sequence"
+                  and older.get("error") == "stale_sequence" and second.sequence_number == 5)
+        results.append(TestResult(
+            name="Replayed or older sequence numbers are rejected",
+            category="heartbeat",
+            passed=passed,
+            expected="ok, stale_sequence, stale_sequence",
+            actual=f"{ok['status']}, {replay.get('error')}, {older.get('error')}"
+        ))
+
+        mismatch = await manager.process_heartbeat(HeartbeatPayload("other", second.session_id, 6, ts))
+        passed = mismatch.get("error") == "device_mismatch"
+        results.append(TestResult(
+            name="Heartbeat from another device is rejected",
+            category="heartbeat",
+            passed=passed,
+            expected="device_mismatch",
+            actual=str(mismatch.get("error"))
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
     # =========================================================================
     # Test Runner
     # =========================================================================
@@ -436,6 +805,8 @@ class GovernanceTestSuite:
             "guardrails": [
                 self.test_scheme0_forbidden_actions,
                 self.test_scheme_specific_constraints,
+                self.test_unknown_agent_denied,
+                self.test_scheme_parse_coverage,
             ],
             "classification": [
                 self.test_noevo_agent_classification,
@@ -444,12 +815,20 @@ class GovernanceTestSuite:
             "logic_engine": [
                 self.test_logic_engine_available,
                 self.test_policy_expression_generation,
+                self.test_authentication_required,
+                self.test_identifier_validation,
+                self.test_role_permissions,
             ],
             "evo_noevo": [
                 self.test_evo_noevo_communication,
             ],
             "complete_flow": [
                 self.test_complete_governance_flow,
+                self.test_governed_tool_decorator,
+            ],
+            "heartbeat": [
+                self.test_heartbeat_missed_count,
+                self.test_heartbeat_session_integrity,
             ],
         }
 

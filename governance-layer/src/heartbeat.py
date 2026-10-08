@@ -131,6 +131,7 @@ class HeartbeatManager:
         self.sessions: dict[str, HeartbeatSession] = {}
         self.devices: dict[str, DeviceInfo] = {}
         self.on_session_change = on_session_change
+        self._monitor_task: Optional[asyncio.Task] = None
 
     async def register_device(self, device: DeviceInfo) -> HeartbeatSession:
         """
@@ -138,6 +139,18 @@ class HeartbeatManager:
 
         This is the FIRST step for any device connecting to BROAD.
         """
+        # One live session per device: a re-registration supersedes any
+        # earlier session for the same device instead of leaving it active.
+        for existing in self.sessions.values():
+            if existing.device_id == device.device_id and existing.state != SessionState.TERMINATED:
+                existing.state = SessionState.TERMINATED
+                logger.info(
+                    f"Session {existing.session_id} terminated: "
+                    f"device {device.device_id} re-registered"
+                )
+                if self.on_session_change:
+                    await self.on_session_change(existing)
+
         session_id = str(uuid4())
         session = HeartbeatSession(
             session_id=session_id,
@@ -183,6 +196,26 @@ class HeartbeatManager:
                 "status": "error",
                 "error": "session_terminated",
                 "message": "Session was terminated - device must re-register"
+            }
+
+        if payload.device_id != session.device_id:
+            return {
+                "status": "error",
+                "error": "device_mismatch",
+                "message": "Heartbeat device does not match the session's device"
+            }
+
+        # Sequence numbers must advance: a repeated or older number is a
+        # replay or a duplicate and is not accepted as liveness.
+        if payload.sequence_number <= session.sequence_number:
+            return {
+                "status": "error",
+                "error": "stale_sequence",
+                "message": (
+                    f"Sequence {payload.sequence_number} is not after "
+                    f"{session.sequence_number}"
+                ),
+                "expected_after": session.sequence_number
             }
 
         # Update session state
@@ -248,47 +281,75 @@ class HeartbeatManager:
             "missed_heartbeats": session.missed_count
         }
 
-    async def monitor_sessions(self):
+    async def check_sessions_once(self, now: Optional[datetime] = None) -> list[HeartbeatSession]:
+        """
+        One monitoring pass. Returns the sessions whose state changed.
+
+        A heartbeat is "missed" once per expected interval that has passed
+        without one, so missed_count is derived from elapsed time rather
+        than incremented on every pass: at 1 Hz the third miss is at 4 s and
+        the tenth at 11 s, whatever the polling period of the monitor.
+        """
+        now = now or datetime.now(timezone.utc)
+        changed = []
+
+        for session in list(self.sessions.values()):
+            if session.state in (SessionState.TERMINATED, SessionState.UNREGISTERED):
+                continue
+            if not session.last_heartbeat:
+                continue
+
+            expected_interval = 1.0 / session.current_rate.value
+            elapsed = (now - session.last_heartbeat).total_seconds()
+            missed = max(0, int(elapsed // expected_interval) - 1)
+            if missed == session.missed_count:
+                continue
+            session.missed_count = missed
+
+            if missed >= session.TERMINATE_THRESHOLD:
+                session.state = SessionState.TERMINATED
+                logger.warning(
+                    f"Session {session.session_id} TERMINATED "
+                    f"(missed {missed} heartbeats)"
+                )
+                changed.append(session)
+            elif missed >= session.DEGRADED_THRESHOLD and session.state != SessionState.DEGRADED:
+                session.state = SessionState.DEGRADED
+                logger.warning(
+                    f"Session {session.session_id} DEGRADED "
+                    f"(missed {missed} heartbeats)"
+                )
+                changed.append(session)
+
+        if self.on_session_change:
+            for session in changed:
+                await self.on_session_change(session)
+
+        return changed
+
+    async def monitor_sessions(self, poll_interval: float = 0.1):
         """
         Background task to monitor session health.
 
         Runs continuously, checking for missed heartbeats.
         """
         while True:
-            now = datetime.now(timezone.utc)
+            await self.check_sessions_once()
+            await asyncio.sleep(poll_interval)
 
-            for session in list(self.sessions.values()):
-                if session.state in [SessionState.TERMINATED, SessionState.UNREGISTERED]:
-                    continue
+    def start_monitor(self, poll_interval: float = 0.1) -> asyncio.Task:
+        """Start monitor_sessions as a background task (idempotent)."""
+        if self._monitor_task is None or self._monitor_task.done():
+            self._monitor_task = asyncio.create_task(
+                self.monitor_sessions(poll_interval)
+            )
+        return self._monitor_task
 
-                if session.last_heartbeat:
-                    # Calculate expected heartbeat interval
-                    expected_interval = 1.0 / session.current_rate.value
-                    elapsed = (now - session.last_heartbeat).total_seconds()
-
-                    if elapsed > expected_interval * 2:  # Missed heartbeat
-                        session.missed_count += 1
-
-                        if session.missed_count >= session.TERMINATE_THRESHOLD:
-                            session.state = SessionState.TERMINATED
-                            logger.warning(
-                                f"Session {session.session_id} TERMINATED "
-                                f"(missed {session.missed_count} heartbeats)"
-                            )
-                            if self.on_session_change:
-                                await self.on_session_change(session)
-
-                        elif session.missed_count >= session.DEGRADED_THRESHOLD:
-                            if session.state != SessionState.DEGRADED:
-                                session.state = SessionState.DEGRADED
-                                logger.warning(
-                                    f"Session {session.session_id} DEGRADED "
-                                    f"(missed {session.missed_count} heartbeats)"
-                                )
-                                if self.on_session_change:
-                                    await self.on_session_change(session)
-
-            await asyncio.sleep(0.1)  # Check every 100ms
+    def stop_monitor(self) -> None:
+        """Cancel the background monitor if it is running."""
+        if self._monitor_task and not self._monitor_task.done():
+            self._monitor_task.cancel()
+        self._monitor_task = None
 
     def terminate_session(self, session_id: str, reason: str = "manual"):
         """Manually terminate a session."""

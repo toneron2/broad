@@ -43,8 +43,8 @@ from typing import Optional, Callable, Any
 from functools import wraps
 
 from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer
-from access_agent import AccessAgent, AccessDecision
-from heartbeat import HeartbeatManager, HeartbeatSession, SessionState, DeviceInfo
+from access_agent import AccessAgent
+from heartbeat import HeartbeatManager, DeviceInfo
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("governance")
@@ -136,7 +136,9 @@ class GovernanceGateway:
             GovernanceDecision with full reasoning trace
         """
         start_time = time.time()
-        context = context or {}
+        # Copy: session context is merged in below and must not leak back
+        # into the caller's dict.
+        context = dict(context or {})
         reasoning_trace = []
 
         # Initialize decision
@@ -214,6 +216,16 @@ class GovernanceGateway:
         )
 
         return decision
+
+    def start_session_monitoring(self) -> asyncio.Task:
+        """
+        Start the heartbeat monitor so idle sessions degrade and terminate.
+
+        Without this, a registered session stays ACTIVE forever and the
+        session check in check_access can never fail. Call from within a
+        running event loop.
+        """
+        return self.heartbeat_manager.start_monitor()
 
     def _log_decision(self, decision: GovernanceDecision):
         """Log decision for audit."""
@@ -294,9 +306,15 @@ def governed_mcp_tool(
 
     Usage:
         @governed_mcp_tool("healthcare", "read_patient")
-        async def read_patient(patient_id: str, context: dict = None):
+        async def read_patient(patient_id: str):
             # Only executes if access is granted
             ...
+
+        await read_patient("p-1", context={"authenticated": True}, session_id=sid)
+
+    The wrapper consumes the keyword arguments ``context`` and ``session_id``;
+    they are not passed on to the tool. The governed resource is named
+    "<domain>_<tool_name>".
 
     Args:
         domain: MCP domain (e.g., "healthcare", "sales")
@@ -311,7 +329,7 @@ def governed_mcp_tool(
             session_id = kwargs.pop("session_id", None)
 
             # Build resource name
-            resource = f"{domain}.{tool_name}"
+            resource = f"{domain}_{tool_name}"  # identifier: no "." (see access_agent.IDENTIFIER)
             action = "execute"
 
             # Check governance
@@ -345,14 +363,16 @@ def governed_sync_tool(
     """
     Decorator for synchronous tools that require governance.
 
-    Same as governed_mcp_tool but for sync functions.
+    Same as governed_mcp_tool but for sync functions. The heartbeat session
+    check is asynchronous and is NOT performed here: only guardrails and the
+    Logic Engine run. Use governed_mcp_tool for session-bound calls.
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             context = kwargs.pop("context", {})
 
-            resource = f"{domain}.{tool_name}"
+            resource = f"{domain}_{tool_name}"  # identifier: no "." (see access_agent.IDENTIFIER)
             action = "execute"
 
             # Use sync check

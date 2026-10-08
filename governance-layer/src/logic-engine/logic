@@ -17,6 +17,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"   # pins LC_ALL to a UTF-8 locale
 CORE_DIR="${SCRIPT_DIR}/core"
 ENGINE_DIR="${SCRIPT_DIR}/engines"
 DICT_DIR="${SCRIPT_DIR}/dict"
@@ -37,6 +38,7 @@ USAGE:
 
 OPTIONS:
     -e, --engine ENGINE    Force specific engine (boolean, modal, deontic, etc.)
+    -s, --system SYSTEM    Modal system for the modal engine: K, D, T, S4, S5 (default K)
     -n, --nlp              Enable natural language preprocessing
     -j, --json             Output in JSON format
     -t, --table            Show truth table (boolean only)
@@ -66,7 +68,7 @@ OPERATORS (Figs 1-15):
 EXAMPLES:
     $(basename "$0") "P ∨ ¬P"                     # Tautology check
     $(basename "$0") "P, P → Q ⊢ Q"               # Modus ponens
-    $(basename "$0") -e modal "□P → P"            # Modal validity
+    $(basename "$0") -s T "□P → P"                # Modal validity in T (invalid in K)
     $(basename "$0") --nlp "if P then Q"          # Natural language
     $(basename "$0") "O(P) ∧ F(P)"                # Deontic contradiction
 
@@ -113,6 +115,7 @@ process_expression() {
     local use_nlp="${3:-false}"
     local verbose="${4:-false}"
     local json_output="${5:-false}"
+    local modal_system="${6:-K}"
 
     # Phase 0: NLP preprocessing (if enabled)
     if [[ "$use_nlp" == "true" ]]; then
@@ -120,15 +123,18 @@ process_expression() {
         $verbose && echo "NLP: $expr" >&2
     fi
 
-    # Phase 1: Enhanced Input Analysis
-    local paradigms
-    paradigms=$("${CORE_DIR}/identify.sh" "$expr" 2>/dev/null | grep '^PARADIGMS:' | cut -d: -f2- || echo "boolean")
+    # Phase 1: Enhanced Input Analysis (one identify pass yields both lines)
+    local identification paradigms
+    identification=$("${CORE_DIR}/identify.sh" "$expr" 2>/dev/null || true)
+    paradigms=$(echo "$identification" | grep '^PARADIGMS:' | cut -d: -f2- || true)
+    paradigms="${paradigms:-boolean}"
     $verbose && echo "PARADIGMS: $paradigms" >&2
 
     # Phase 2: Engine Selection
     local engine="$forced_engine"
     if [[ -z "$engine" ]]; then
-        engine=$("${CORE_DIR}/identify.sh" "$expr" 2>/dev/null | grep '^PRIMARY:' | cut -d: -f2 || echo "boolean")
+        engine=$(echo "$identification" | grep '^PRIMARY:' | cut -d: -f2 || true)
+        engine="${engine:-boolean}"
     fi
     $verbose && echo "ENGINE: $engine" >&2
 
@@ -141,7 +147,7 @@ process_expression() {
             ;;
         modal)
             if [[ -x "${ENGINE_DIR}/modal.sh" ]]; then
-                result=$("${ENGINE_DIR}/modal.sh" "$expr" 2>&1) || true
+                result=$("${ENGINE_DIR}/modal.sh" -s "$modal_system" "$expr" 2>&1) || true
             else
                 result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
             fi
@@ -185,12 +191,17 @@ main() {
     local json_output=false
     local table_mode=false
     local debug=false
+    local modal_system="K"
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
             -e|--engine)
                 forced_engine="$2"
+                shift 2
+                ;;
+            -s|--system)
+                modal_system="$2"
                 shift 2
                 ;;
             -n|--nlp)
@@ -246,7 +257,7 @@ main() {
     fi
 
     # Process expression
-    process_expression "$expression" "$forced_engine" "$use_nlp" "$verbose" "$json_output"
+    process_expression "$expression" "$forced_engine" "$use_nlp" "$verbose" "$json_output" "$modal_system"
 }
 
 main "$@"

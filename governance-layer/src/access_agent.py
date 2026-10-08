@@ -33,8 +33,8 @@ Usage:
 COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
 """
 
+import re
 import subprocess
-import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -50,6 +50,23 @@ LOGIC_ENGINE_DIR = Path(__file__).parent / "logic-engine"
 LOGIC_ENGINE = LOGIC_ENGINE_DIR / "logic"
 META_ENGINE = LOGIC_ENGINE_DIR / "engines" / "meta.sh"
 DEONTIC_ENGINE = LOGIC_ENGINE_DIR / "engines" / "deontic.sh"
+
+# Every value interpolated into a policy expression must be a bare
+# identifier. The expression is evaluated by a shell engine, and bash
+# arithmetic performs command substitution before it evaluates, so anything
+# outside this alphabet is rejected before it is built into an expression.
+IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+# Whole-word verdicts. "VALID" in result would also match "INVALID".
+RE_VALID = re.compile(r"(?<![A-Z])VALID(?![A-Z])")
+RE_CONFLICT = re.compile(r"\b(INCONSISTENT|CONFLICT)\b")
+RE_ERROR = re.compile(r"^(ERROR|TIMEOUT)\b", re.MULTILINE)
+RE_PARADIGMS = re.compile(r"^PARADIGMS_EVALUATED:\s*(.*)$", re.MULTILINE)
+
+
+def is_identifier(value: Optional[str]) -> bool:
+    """True if value is safe to interpolate into a policy expression."""
+    return value is not None and bool(IDENTIFIER.match(value))
 
 
 @dataclass
@@ -237,43 +254,67 @@ class AccessAgent:
             custom_constraints=ctx.get("constraints", {})
         )
 
+        # Reject anything that is not a bare identifier before it reaches
+        # the shell engines (see IDENTIFIER).
+        bad = [
+            name for name, value in (
+                ("resource", resource), ("action", action), ("role", res_ctx.user_role)
+            )
+            if value is not None and not is_identifier(value)
+        ]
+        if bad:
+            decision = AccessDecision(
+                allowed=False,
+                reasoning_trace=f"REJECTED: invalid identifier in {', '.join(bad)}",
+                paradigms_used=[],
+                confidence=0.0,
+                policy_expression="",
+            )
+            self._access_log.append(decision)
+            logger.warning(
+                f"Access rejected: resource={resource!r} action={action!r} "
+                f"invalid identifier in {bad}"
+            )
+            return decision
+
         # Build formal policy expression
         policy_expr = self._build_policy_expression(res_ctx)
 
-        # Evaluate through Logic Engine
+        # Evaluate through Logic Engine.
+        #
+        # What the engine contributes: it checks the policy is well formed
+        # and consistent across paradigms (no O(x) ∧ F(x), no □¬x ∧ O(x))
+        # and records the derivation. What it cannot contribute: "(O(auth)
+        # ∧ ...) → P(read)" is a policy, not a theorem, so its validity says
+        # nothing about this request; the request's facts are the context
+        # flags. Authentication is therefore a hard requirement here, and a
+        # conflicting or unevaluable policy denies.
         try:
-            # Use meta-engine for cross-paradigm evaluation
             result = self._run_meta_engine(policy_expr)
 
-            # Parse result
-            paradigms = []
-            if "BOOLEAN" in result:
-                paradigms.append("boolean")
-            if "MODAL" in result:
-                paradigms.append("modal")
-            if "DEONTIC" in result:
-                paradigms.append("deontic")
+            paradigms_match = RE_PARADIGMS.search(result)
+            paradigms = paradigms_match.group(1).split() if paradigms_match else []
 
-            # Determine if access allowed
-            allowed = (
-                "VALID" in result or
-                "ALLOW" in result or
-                ("P(" in policy_expr and "F(" not in policy_expr and res_ctx.authenticated)
-            )
+            trace_lines = []
+            engine_ok = True
+            if RE_ERROR.search(result):
+                engine_ok = False
+                trace_lines.append("DENY: logic engine reported an error")
+            if RE_CONFLICT.search(result):
+                engine_ok = False
+                trace_lines.append("DENY: policy is inconsistent across paradigms")
+            if not res_ctx.authenticated:
+                trace_lines.append("DENY: authentication required")
 
-            # Handle forbidden explicitly
-            if "F(" in policy_expr and not any([
-                res_ctx.authenticated,
-                res_ctx.user_role,
-                res_ctx.consent_given
-            ]):
-                allowed = False
+            allowed = engine_ok and res_ctx.authenticated
+            if allowed:
+                trace_lines.append("ALLOW: authenticated, policy consistent")
 
             decision = AccessDecision(
                 allowed=allowed,
-                reasoning_trace=result,
+                reasoning_trace="\n".join(trace_lines) + "\n" + result,
                 paradigms_used=paradigms,
-                confidence=1.0 if "VALID" in result else 0.8,
+                confidence=1.0 if engine_ok else 0.0,
                 policy_expression=policy_expr
             )
 
@@ -309,20 +350,32 @@ class AccessAgent:
         Evaluate bio-authentication policy.
 
         ESN Policy: O(bio_auth) → P(identity_verified)
+
+        The verified flag is the fact; the deontic engine checks the policy
+        statement is consistent and supplies the trace.
         """
         if bio_auth_verified:
             policy = "O(bio_auth) → P(identity_verified)"
         else:
             policy = "¬O(bio_auth) → F(access)"
 
-        result = self._run_logic(policy)
+        consistency = self._run_deontic_engine(policy, check_consistency=True)
+        consistent = not RE_CONFLICT.search(consistency)
 
         return AccessDecision(
-            allowed=bio_auth_verified and "VALID" in result,
-            reasoning_trace=result,
+            allowed=bio_auth_verified and consistent,
+            reasoning_trace=consistency,
             paradigms_used=["deontic"],
+            confidence=1.0 if consistent else 0.0,
             policy_expression=policy
         )
+
+    # Actions each role may perform. "*" means any action.
+    ROLE_PERMISSIONS = {
+        "admin": {"*"},
+        "operator": {"control", "view"},
+        "viewer": {"view"},
+    }
 
     def check_role_permission(self, role: str, action: str) -> AccessDecision:
         """
@@ -332,25 +385,36 @@ class AccessAgent:
             - O(role=admin) → P(delete_data)
             - O(role=operator) → P(control_device)
             - O(role=viewer) → P(view_data) ∧ F(delete_data)
+
+        The permission table decides; the deontic engine checks that the
+        policy statement built for the role is consistent (no action both
+        permitted and forbidden) and supplies the trace.
         """
-        role_policies = {
-            "admin": f"O(role=admin) → P({action})",
-            "operator": f"O(role=operator) → P(control) ∧ P(view)",
-            "viewer": f"O(role=viewer) → P(view) ∧ F(delete) ∧ F(control)",
-        }
+        if not is_identifier(role) or not is_identifier(action):
+            return AccessDecision(
+                allowed=False,
+                reasoning_trace="REJECTED: invalid identifier in role or action",
+                paradigms_used=["deontic"],
+                confidence=0.0,
+            )
 
-        policy = role_policies.get(role, f"F({action})")
-        result = self._run_deontic_engine(policy)
+        permitted = self.ROLE_PERMISSIONS.get(role)
+        if permitted is None:
+            policy = f"F({action})"
+            role_allows = False
+        else:
+            role_allows = "*" in permitted or action in permitted
+            verdict = "P" if role_allows else "F"
+            policy = f"O(role={role}) → {verdict}({action})"
 
-        # Check if action is permitted for role
-        allowed = "VALID" in result and f"P({action})" in policy
-        if role == "viewer" and action in ["delete", "control"]:
-            allowed = False
+        consistency = self._run_deontic_engine(policy, check_consistency=True)
+        consistent = not RE_CONFLICT.search(consistency)
 
         return AccessDecision(
-            allowed=allowed,
-            reasoning_trace=result,
+            allowed=role_allows and consistent,
+            reasoning_trace=consistency,
             paradigms_used=["deontic"],
+            confidence=1.0 if consistent else 0.0,
             policy_expression=policy
         )
 
@@ -361,6 +425,19 @@ class AccessAgent:
     def clear_audit_log(self) -> None:
         """Clear the audit log."""
         self._access_log = []
+
+
+# Shared agent for the decorator. Constructing an AccessAgent runs a health
+# check against the engine (about 90 ms), so one per call is wasteful.
+_default_agent: Optional[AccessAgent] = None
+
+
+def get_access_agent() -> AccessAgent:
+    """Return the process-wide AccessAgent, creating it on first use."""
+    global _default_agent
+    if _default_agent is None:
+        _default_agent = AccessAgent()
+    return _default_agent
 
 
 # MCP Tool Integration Decorator
@@ -376,8 +453,7 @@ def governed_access(resource: str, action: str):
     """
     def decorator(func):
         def wrapper(*args, context: dict = None, **kwargs):
-            agent = AccessAgent()
-            decision = agent.check_access(resource, action, context)
+            decision = get_access_agent().check_access(resource, action, context)
 
             if not decision.allowed:
                 raise PermissionError(

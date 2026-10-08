@@ -28,7 +28,7 @@ This implementation demonstrates that the specified Logic Engine architecture (F
 
 ## Features
 
-- **Multi-Paradigm Logic**: Boolean, Modal (K/T/S4/S5), Deontic (O/P/F)
+- **Multi-Paradigm Logic**: Boolean, Modal (K/D/T/S4/S5), Deontic (O/P/F)
 - **Agentic Composition**: Meta-engine for on-the-fly paradigm composition
 - **NLP Layer**: Bidirectional English ↔ Formal notation translation
 - **Cross-System Validation**: Conflict detection across paradigms
@@ -41,9 +41,10 @@ This implementation demonstrates that the specified Logic Engine architecture (F
 ./logic "P ∨ ¬P"                      # → TAUTOLOGY
 ./logic "P, P → Q ⊢ Q"                # → VALID (modus ponens)
 
-# Modal logic
-./logic "□P → P"                      # → VALID in T, S4, S5
+# Modal logic (validity is checked over every frame of the chosen system)
+./logic -s T "□P → P"                 # → VALID in T (INVALID in K: the empty frame)
 ./engines/modal.sh -s S5 "◇P → □◇P"   # → VALID in S5
+./engines/modal.sh -s T -w 3 "◇P → □◇P"  # → INVALID in T (needs 3 worlds to refute)
 
 # Deontic logic
 ./logic "O(P) → P(P)"                 # → VALID (ought implies can)
@@ -126,6 +127,10 @@ The Logic Engine powers the ESN Access Agent for:
 5. **Conflict Detection**: Automatic cross-paradigm validation
 
 ## Running Tests
+
+The suite passes 118 and skips 17 (combinatorial cases marked CHECK). The engines pin
+`LC_ALL` to a UTF-8 locale themselves; the multi-byte operators are matched by bracket
+expression and are misread byte by byte in a POSIX locale.
 
 ```bash
 # Generate and run all tests

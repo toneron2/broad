@@ -47,6 +47,7 @@ class AgentType(Enum):
     NOEVO = "noevo"          # Fixed, verified, immutable
     EVO = "evo"              # Adaptive within bounds
     CONTROLLED = "controlled" # Human authorization required
+    UNKNOWN = "unknown"      # Not registered in any scheme: trusted for nothing
 
 
 @dataclass
@@ -160,16 +161,22 @@ class GuardrailsLoader:
 
         # Parse the file
         with open(file_path, 'r') as f:
-            for line in f:
-                line = line.strip()
+            for lineno, raw in enumerate(f, 1):
+                # Drop trailing comments ("□(x ≤ 5s)  # Default timeout")
+                line = raw.split('#', 1)[0].strip()
 
                 # Skip comments and empty lines
-                if not line or line.startswith('#'):
+                if not line:
                     continue
 
                 # Parse constraint
                 constraint = self._parse_constraint(line)
-                if constraint:
+                if constraint is None:
+                    logger.warning(
+                        f"{file_path.name}:{lineno}: unparsed constraint, "
+                        f"not enforced: {line}"
+                    )
+                elif constraint:
                     if constraint.constraint_type == ConstraintType.FORBIDDEN:
                         scheme.forbidden.append(constraint)
                     elif constraint.constraint_type == ConstraintType.OBLIGATORY:
@@ -187,6 +194,18 @@ class GuardrailsLoader:
         deontic_pattern = r'^([FOPfop])\(([^)]+)\)(?:\s*←\s*(.+))?$'
         # Pattern for □(expression) or □[bounds](expression)
         temporal_pattern = r'^□(?:\[([^\]]+)\])?\((.+)\)$'
+        # Pattern for a conditional obligation: P(x) → O(y), F(x) → O(y)
+        conditional_pattern = r'^([FOPfop]\([^)]+\))\s*→\s*[Oo]\(([^)]+)\)$'
+
+        # Try conditional obligation first (it also contains "O(...)")
+        match = re.match(conditional_pattern, line)
+        if match:
+            return Constraint(
+                constraint_type=ConstraintType.OBLIGATORY,
+                action=match.group(2).strip(),
+                condition=match.group(1).strip(),
+                raw_expression=line
+            )
 
         # Try deontic pattern
         match = re.match(deontic_pattern, line)
@@ -306,12 +325,13 @@ class GuardrailsEnforcer:
                 constraint = self._scheme0.get_forbidden_constraint(action)
                 return False, f"BLOCKED by Scheme 0: {constraint}"
 
-        # Get agent's specific scheme
+        # Get agent's specific scheme. An agent that is not registered in
+        # any scheme has no permissions at all: deny rather than fall back
+        # to "only Scheme 0 applies", which was the least restrictive case.
         agent_scheme = self.loader.get_scheme_for_agent(agent_name)
         if not agent_scheme:
             logger.warning(f"No scheme found for agent: {agent_name}")
-            # Default to most restrictive (Scheme 0 only)
-            return True, "No agent-specific scheme (Scheme 0 checked)"
+            return False, f"DENIED: no guardrails scheme registered for agent '{agent_name}'"
 
         # Check agent's scheme for forbidden actions
         if agent_scheme.is_action_forbidden(action):
@@ -350,11 +370,17 @@ class GuardrailsEnforcer:
         return obligation.action in performed_actions
 
     def get_agent_type(self, agent_name: str) -> AgentType:
-        """Get the agent type (EVO/NOEVO) for an agent."""
+        """
+        Get the agent type (EVO/NOEVO) for an agent.
+
+        An unregistered agent is UNKNOWN. It must not default to NOEVO:
+        NOEVO is the trusted class (NOEVO → NOEVO calls are direct), so that
+        default handed the most trust to the least known caller.
+        """
         scheme = self.loader.get_scheme_for_agent(agent_name)
         if scheme:
             return scheme.agent_type
-        return AgentType.NOEVO  # Default to most restrictive
+        return AgentType.UNKNOWN
 
     def is_evo_agent(self, agent_name: str) -> bool:
         """Check if an agent is EVO (can evolve)."""

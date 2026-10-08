@@ -22,5 +22,7 @@ O(P), ¬P, O(¬P → Q) ⊢ O(Q)|VALID
 O(P) ∧ F(P)|INCONSISTENT
 O(P) ∧ O(¬P)|INCONSISTENT
 # === ACCESS CONTROL ===
-O(auth) → P(access)|VALID
+O(auth) → P(access)|INVALID
+O(auth) → P(auth)|VALID
 F(access) → ¬P(access)|VALID
+O(auth) ∧ F(auth)|INCONSISTENT
