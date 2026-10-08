@@ -558,14 +558,19 @@ class GovernedHeartbeatManager(HeartbeatManager):
         self,
         session_id: str,
         resource: str,
-        action: str
+        action: str,
+        request_context: Optional[dict] = None
     ) -> dict:
         """
         Check access using session context + Access Agent.
 
-        This combines heartbeat session state with Logic Engine reasoning.
+        This combines heartbeat session state (authenticated, session_valid)
+        with what the request itself asserts (role, consent, facts) and the
+        Logic Engine's decision against the resource's policy.
         """
         context = await self.get_session_context(session_id)
+        if context and request_context:
+            context = {**request_context, **context}
 
         if not context:
             return {
@@ -663,7 +668,8 @@ if __name__ == "__main__":
             access_result = await governed_manager.check_access(
                 session_id=client2.session_id,
                 resource="patient_records",
-                action="read"
+                action="read",
+                request_context={"role": "nurse"}
             )
             print(f"    Access result: {access_result}")
 

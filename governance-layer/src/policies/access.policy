@@ -1,0 +1,33 @@
+# Access policies for the Security Agent (access_agent.py)
+#
+# Format:   <resource>.<action>: <policy>
+#
+# <policy> is a formal expression in the Logic Engine's notation, decided by
+# engines/meta.sh -a against the request's facts. The Security Agent turns a
+# request's context into facts: "auth" when authenticated, "role=<role>",
+# "session" when the heartbeat session is valid, "consent" when consent was
+# given, plus any identifiers the caller lists in context["facts"].
+#
+# A request is ALLOWED only when the policy's antecedent holds under those
+# facts and its consequent grants P(...). A resource.action with no line here
+# is denied. "*" is a wildcard; the most specific line wins:
+#     resource.action  >  resource.*  >  *.action  >  *.*
+#
+# These are starting policies for the resources the demos and tests use.
+# They are the place to state who may do what; the code does not decide that.
+
+# --- Clinical records (PHI) --------------------------------------------------
+patient_records.read:   (O(auth) ∧ (O(role=nurse) ∨ O(role=provider) ∨ O(role=admin)) ∧ □session) → P(read_patient_records)
+patient_records.write:  (O(auth) ∧ (O(role=provider) ∨ O(role=admin)) ∧ □session ∧ O(consent)) → P(write_patient_records)
+patient_records.delete: (O(auth) ∧ O(role=admin) ∧ □session) → P(delete_patient_records)
+patient_records.*:      F(access_patient_records)
+
+# --- Device telemetry (igent sensors) -----------------------------------------
+device_telemetry.read:  (O(auth) ∧ □session) → P(read_device_telemetry)
+
+# --- Workflows produced by the designer agent ---------------------------------
+workflow.generate:      (O(auth) ∧ O(role=designer)) → P(generate_workflow)
+workflow.deploy:        (O(auth) ∧ O(role=admin) ∧ O(verified)) → P(deploy_workflow)
+
+# --- MCP tools, named <domain>_<tool>, action "execute" (governed_mcp_tool) --
+healthcare_read_patient.execute: (O(auth) ∧ (O(role=provider) ∨ O(role=nurse) ∨ O(role=admin))) → P(execute_healthcare_read_patient)
