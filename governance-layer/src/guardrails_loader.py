@@ -50,6 +50,121 @@ class AgentType(Enum):
     UNKNOWN = "unknown"      # Not registered in any scheme: trusted for nothing
 
 
+# ---------------------------------------------------------------------------
+# Condition evaluation
+#
+# A permitted or obligatory constraint may carry a condition after "←":
+#     P(route_to_evo_agent) ← authenticated(user) ∧ bounded(request)
+# Conditions are conjunctions/disjunctions of atoms. An atom "name(arg)" or
+# "name" holds when the request context has a truthy value under "name", or
+# lists the atom (with or without its argument) in context["facts"].
+# ---------------------------------------------------------------------------
+
+_COND_ATOM = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)(?:\(([^)]*)\))?$')
+_DEONTIC_ATOM = re.compile(r'^[FOPfop]\(([^)]+)\)$')
+
+
+def atom_holds(atom: str, context: dict) -> Optional[bool]:
+    """True/False for a condition atom, None if the atom is not well formed."""
+    atom = atom.strip()
+    match = _COND_ATOM.match(atom)
+    if not match:
+        return None
+    name = match.group(1)
+    facts = context.get("facts") or ()
+    if atom in facts or name in facts:
+        return True
+    value = context.get(name)
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return bool(value)
+
+
+def evaluate_condition(condition: str, context: dict) -> Optional[bool]:
+    """
+    Evaluate a "←" condition against a request context.
+
+    Supports atoms joined by ∧ (all must hold) and ∨ (any must hold), with
+    ∧ binding tighter than ∨. Returns None if any atom is not well formed,
+    so a condition the enforcer cannot read is never silently satisfied.
+    """
+    condition = condition.strip()
+    if condition.startswith("(") and condition.endswith(")"):
+        condition = condition[1:-1].strip()
+    disjuncts = [d for d in re.split(r'\s*∨\s*', condition) if d]
+    if not disjuncts:
+        return None
+    any_true = False
+    for disjunct in disjuncts:
+        values = [atom_holds(a, context) for a in re.split(r'\s*∧\s*', disjunct) if a]
+        if not values or any(v is None for v in values):
+            return None
+        if all(values):
+            any_true = True
+    return any_true
+
+
+# ---------------------------------------------------------------------------
+# Temporal bounds
+#
+#     □(idle_session_timeout ≤ 30m)      □[0,1h](design_proposals ≤ 5)
+#
+# A bound compares a named metric with a limit. Limits are durations
+# (ms, s, m, h, d → seconds), sizes (KB, MB, GB → bytes), percentages,
+# money ($) or plain numbers. A symbolic limit (tool.timeout, allocated)
+# cannot be enforced by the loader and is reported as such.
+# ---------------------------------------------------------------------------
+
+_BOUND = re.compile(r'^([A-Za-z_][A-Za-z0-9_]*)\s*(≤|<|≥|>|=|≠|<=|>=|==)\s*(.+)$')
+_UNITS = {
+    "ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0, "d": 86400.0,
+    "kb": 1024.0, "mb": 1024.0 ** 2, "gb": 1024.0 ** 3,
+    "%": 1.0,
+}
+_LIMIT = re.compile(r'^\$?\s*([0-9]+(?:\.[0-9]+)?)\s*([A-Za-z%]*)$')
+_COMPARE = {
+    "≤": lambda a, b: a <= b, "<=": lambda a, b: a <= b,
+    "<": lambda a, b: a < b,
+    "≥": lambda a, b: a >= b, ">=": lambda a, b: a >= b,
+    ">": lambda a, b: a > b,
+    "=": lambda a, b: a == b, "==": lambda a, b: a == b,
+    "≠": lambda a, b: a != b,
+}
+
+
+def parse_limit(text: str) -> Optional[float]:
+    """Numeric value of a bound's limit in base units, or None if symbolic."""
+    match = _LIMIT.match(text.strip())
+    if not match:
+        return None
+    number, unit = float(match.group(1)), match.group(2).lower()
+    if not unit:
+        return number
+    if unit in _UNITS:
+        return number * _UNITS[unit]
+    return None
+
+
+@dataclass
+class TemporalBound:
+    """A machine-checkable □(metric op limit) constraint."""
+    metric: str
+    operator: str
+    limit: float
+    limit_text: str
+    window: Optional[str]
+    constraint: "Constraint"
+
+    def holds(self, value: float) -> bool:
+        return _COMPARE[self.operator](value, self.limit)
+
+    def __str__(self) -> str:
+        window = f"[{self.window}]" if self.window else ""
+        return f"□{window}({self.metric} {self.operator} {self.limit_text})"
+
+
 @dataclass
 class Constraint:
     """A single formal constraint from a guardrails scheme."""
@@ -95,6 +210,26 @@ class GuardrailsScheme:
             if c.action == action:
                 return c
         return None
+
+    def temporal_bounds(self) -> tuple[list[TemporalBound], list[Constraint]]:
+        """
+        Split the temporal constraints into machine-checkable bounds and
+        the rest (symbolic limits such as "tool.timeout", and implications
+        such as "security_violation → O(escalate_to_human)").
+        """
+        bounds, other = [], []
+        for c in self.temporal:
+            match = _BOUND.match(c.action)
+            limit = parse_limit(match.group(3)) if match else None
+            if match and limit is not None:
+                bounds.append(TemporalBound(
+                    metric=match.group(1), operator=match.group(2), limit=limit,
+                    limit_text=match.group(3).strip(), window=c.temporal_bound,
+                    constraint=c
+                ))
+            else:
+                other.append(c)
+        return bounds, other
 
 
 class GuardrailsLoader:
@@ -338,14 +473,85 @@ class GuardrailsEnforcer:
             constraint = agent_scheme.get_forbidden_constraint(action)
             return False, f"Forbidden by Scheme {agent_scheme.scheme_id}: {constraint}"
 
-        # Check for obligatory actions (if action requires prerequisites)
+        # A conditional permission "P(x) ← cond" is enforced when x is the
+        # action being exercised: cond must hold in the request context. A
+        # condition the enforcer cannot read is treated as not met.
+        # (Permissions are not an allowlist: an action with no P() entry is
+        # governed by the forbidden and obligatory constraints alone.)
+        for permitted in agent_scheme.permitted:
+            if permitted.condition and permitted.action == action:
+                holds = evaluate_condition(permitted.condition, context)
+                if holds is None:
+                    return False, f"Condition not evaluable for {permitted}"
+                if not holds:
+                    return False, f"Condition not met for {permitted}"
+
+        # Obligations. Three ways an obligation can apply to this action:
+        #   O(y) ← P(x)      when the action is x (or x_...)
+        #   O(y) ← cond      when cond holds in the request context
+        #   O(y)             when the built-in prerequisite table says so
         for obligatory in agent_scheme.obligatory:
-            if self._action_requires(action, obligatory.action):
-                # Check if the obligation is satisfied
+            if self._obligation_applies(obligatory, action, context):
                 if not self._is_obligation_satisfied(obligatory, context):
                     return False, f"Obligation not met: {obligatory}"
 
         return True, f"Allowed by Scheme {agent_scheme.scheme_id}"
+
+    def _obligation_applies(self, obligation: Constraint, action: str, context: dict) -> bool:
+        """Does this obligation bind the current action?"""
+        if obligation.condition:
+            match = _DEONTIC_ATOM.match(obligation.condition.strip())
+            if match:
+                trigger = match.group(1).strip()
+                return action == trigger or action.startswith(trigger + "_")
+            return evaluate_condition(obligation.condition, context) is True
+        return self._action_requires(action, obligation.action)
+
+    def check_temporal_bounds(
+        self,
+        agent_name: str,
+        metrics: dict
+    ) -> tuple[bool, list[str]]:
+        """
+        Check measured values against the □(metric op limit) bounds of
+        Scheme 0 and the agent's scheme.
+
+        Args:
+            agent_name: the agent whose scheme applies (Scheme 0 always does)
+            metrics: metric name → measured value in base units (seconds,
+                     bytes, percent, count). Metrics with no bound are ignored;
+                     bounds with no metric are not checked.
+
+        Returns:
+            (all_hold, violations) where each violation names the bound and
+            the measured value.
+        """
+        schemes = [s for s in (self._scheme0, self.loader.get_scheme_for_agent(agent_name)) if s]
+        violations = []
+        seen = set()
+        for scheme in schemes:
+            if scheme.scheme_id in seen:
+                continue
+            seen.add(scheme.scheme_id)
+            bounds, _ = scheme.temporal_bounds()
+            for bound in bounds:
+                if bound.metric not in metrics:
+                    continue
+                try:
+                    value = float(metrics[bound.metric])
+                except (TypeError, ValueError):
+                    violations.append(f"Scheme {scheme.scheme_id}: {bound} has non-numeric value {metrics[bound.metric]!r}")
+                    continue
+                if not bound.holds(value):
+                    violations.append(f"Scheme {scheme.scheme_id}: {bound} violated, measured {value:g}")
+        return not violations, violations
+
+    def unenforceable_temporal(self) -> dict[int, list[str]]:
+        """Temporal constraints per scheme that the enforcer cannot check."""
+        return {
+            sid: [c.raw_expression for c in scheme.temporal_bounds()[1]]
+            for sid, scheme in sorted(self.loader.schemes.items())
+        }
 
     def _action_requires(self, action: str, prerequisite: str) -> bool:
         """Check if an action has a prerequisite."""

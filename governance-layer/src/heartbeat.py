@@ -272,13 +272,20 @@ class HeartbeatManager:
             return None
 
         device = self.devices.get(session.device_id)
+        now = datetime.now(timezone.utc)
+        idle = (now - session.last_heartbeat).total_seconds() if session.last_heartbeat else None
+        age = (now - datetime.fromisoformat(session.created_at)).total_seconds()
 
         return {
             "session_valid": session.state == SessionState.ACTIVE,
             "authenticated": session.auth_verified,
             "device_type": device.device_type if device else "unknown",
             "activity_level": session.current_rate.name,
-            "missed_heartbeats": session.missed_count
+            "missed_heartbeats": session.missed_count,
+            # Used by the gateway for the Scheme 0 session bounds
+            # □(idle_session_timeout ≤ 30m) and □(maximum_session_duration ≤ 24h)
+            "idle_seconds": idle,
+            "session_age_seconds": age,
         }
 
     async def check_sessions_once(self, now: Optional[datetime] = None) -> list[HeartbeatSession]:

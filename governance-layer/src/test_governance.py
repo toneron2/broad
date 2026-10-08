@@ -30,7 +30,7 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 
 # Import governance components
-from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer
+from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer, evaluate_condition
 from access_agent import AccessAgent
 from governed_access import GovernanceGateway, governed_mcp_tool
 from heartbeat import HeartbeatManager, HeartbeatPayload, DeviceInfo, SessionState
@@ -282,6 +282,153 @@ class GovernanceTestSuite:
 
         for r in results:
             self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
+    def test_conditional_permissions(self) -> list[TestResult]:
+        """A "P(x) ← cond" permission is enforced when x is exercised."""
+        results = []
+
+        cases = [
+            # Scheme 1: P(execute_verified_tool) ← authorized(user) ∧ registered(tool)
+            ("tool_agent", "execute_verified_tool", {}, False, "no facts"),
+            ("tool_agent", "execute_verified_tool", {"authorized": True}, False, "only authorized"),
+            ("tool_agent", "execute_verified_tool",
+             {"authorized": True, "facts": ["registered(tool)"]}, True, "authorized and registered"),
+            # Scheme 1: P(route_to_evo_agent) ← authenticated(user) ∧ bounded(request)
+            ("routing_agent", "route_to_evo_agent", {"authenticated": True}, False, "unbounded request"),
+            ("routing_agent", "route_to_evo_agent",
+             {"authenticated": True, "facts": ["bounded"]}, True, "bounded request"),
+            # Scheme 1: P(call_mcp_tool) ← registered(tool) ∧ authorized(user) ∧ access_granted
+            ("tool_agent", "call_mcp_tool",
+             {"authorized": True, "access_granted": True}, False, "tool not registered"),
+            ("tool_agent", "call_mcp_tool",
+             {"authorized": True, "access_granted": True, "facts": ["registered(tool)"]}, True,
+             "all three conditions"),
+            # Scheme 2: P(propose_optimization) ← existing_component ∧ within_bounds
+            ("designer_agent", "propose_optimization", {"within_bounds": True}, False, "no existing component"),
+            ("designer_agent", "propose_optimization",
+             {"within_bounds": True, "existing_component": True}, True, "existing component in bounds"),
+        ]
+
+        for agent, action, context, expected, label in cases:
+            allowed, reason = self.enforcer.check_action(action, agent, context)
+            passed = allowed == expected
+            results.append(TestResult(
+                name=f"{agent}: {action} ({label})",
+                category="guardrails",
+                passed=passed,
+                expected="ALLOWED" if expected else "DENIED",
+                actual="ALLOWED" if allowed else "DENIED",
+                notes=reason
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        # ∨ and ∧ precedence in a condition
+        cond = "learning_failure ∨ design_failure"
+        evals = [
+            (evaluate_condition(cond, {"design_failure": True}), True),
+            (evaluate_condition(cond, {}), False),
+            (evaluate_condition("a ∧ b ∨ c", {"c": True}), True),
+            (evaluate_condition("a ∧ b ∨ c", {"a": True}), False),
+            (evaluate_condition("a ∧ ???", {"a": True}), None),
+        ]
+        passed = all(got == want for got, want in evals)
+        results.append(TestResult(
+            name="Condition evaluation (∧ binds tighter than ∨, malformed → None)",
+            category="guardrails",
+            passed=passed,
+            expected=str([w for _, w in evals]),
+            actual=str([g for g, _ in evals])
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_conditional_obligations(self) -> list[TestResult]:
+        """An "O(y) ← cond" obligation binds when its condition holds."""
+        results = []
+
+        # Scheme 1: O(verify_evo_request) ← request_from_evo
+        base = {"authorized": True, "facts": ["registered(tool)"]}
+        cases = [
+            ("tool_agent", "execute_verified_tool", {**base}, True, "not from EVO"),
+            ("tool_agent", "execute_verified_tool", {**base, "request_from_evo": True}, False,
+             "from EVO, not verified"),
+            ("tool_agent", "execute_verified_tool",
+             {**base, "request_from_evo": True, "performed_actions": ["verify_evo_request"]}, True,
+             "from EVO, verified"),
+            # Scheme 3: P(compose) → O(verify_composition_result)
+            ("composer_agent", "compose_verified_components",
+             {"facts": ["all_components_verified"]}, False, "composition not verified"),
+            ("composer_agent", "compose_verified_components",
+             {"facts": ["all_components_verified"], "performed_actions": ["verify_composition_result"]},
+             True, "composition verified"),
+        ]
+
+        for agent, action, context, expected, label in cases:
+            allowed, reason = self.enforcer.check_action(action, agent, context)
+            passed = allowed == expected
+            results.append(TestResult(
+                name=f"{agent}: {action} ({label})",
+                category="guardrails",
+                passed=passed,
+                expected="ALLOWED" if expected else "DENIED",
+                actual="ALLOWED" if allowed else "DENIED",
+                notes=reason
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_temporal_bounds(self) -> list[TestResult]:
+        """□(metric op limit) bounds are checked against measured values."""
+        results = []
+
+        cases = [
+            ("tool_agent", {"idle_session_timeout": 29 * 60}, True, "idle 29 min"),
+            ("tool_agent", {"idle_session_timeout": 31 * 60}, False, "idle 31 min"),
+            ("tool_agent", {"maximum_session_duration": 23 * 3600}, True, "session 23 h"),
+            ("tool_agent", {"maximum_session_duration": 25 * 3600}, False, "session 25 h"),
+            ("routing_agent", {"route_retry": 3}, True, "3 retries"),
+            ("routing_agent", {"route_retry": 4}, False, "4 retries"),
+            ("tool_agent", {"tool_response": 6}, False, "tool response 6 s (bound carried a comment)"),
+            ("designer_agent", {"memory_usage": 600 * 1024 ** 2}, False, "designer memory 600 MB"),
+            ("designer_agent", {"cpu_usage": 40}, True, "designer cpu 40 %"),
+            ("composer_agent", {"workflow_steps": 51}, False, "51 workflow steps"),
+            ("tool_agent", {"unbounded_metric": 10 ** 9}, True, "metric with no bound"),
+            ("security_agent", {"security_decision": 0.04}, True, "decision in 40 ms"),
+            ("security_agent", {"security_decision": 0.6}, False, "decision in 600 ms"),
+        ]
+
+        for agent, metrics, expected, label in cases:
+            ok, violations = self.enforcer.check_temporal_bounds(agent, metrics)
+            passed = ok == expected
+            results.append(TestResult(
+                name=f"Temporal bound: {label}",
+                category="guardrails",
+                passed=passed,
+                expected="HOLDS" if expected else "VIOLATED",
+                actual="HOLDS" if ok else "VIOLATED",
+                notes="; ".join(violations)
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        # Every □ constraint is either checkable or explicitly listed as not
+        enforceable = sum(len(sch.temporal_bounds()[0]) for sch in self.enforcer.loader.schemes.values())
+        unenforceable = self.enforcer.unenforceable_temporal()
+        total_temporal = sum(len(sch.temporal) for sch in self.enforcer.loader.schemes.values())
+        listed = sum(len(v) for v in unenforceable.values())
+        passed = enforceable + listed == total_temporal and enforceable >= 30
+        results.append(TestResult(
+            name=f"Temporal constraints accounted for ({enforceable} checkable, {listed} symbolic)",
+            category="guardrails",
+            passed=passed,
+            expected=str(total_temporal),
+            actual=str(enforceable + listed),
+            notes=str(unenforceable)
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
         return results
 
     # =========================================================================
@@ -678,6 +825,90 @@ class GovernanceTestSuite:
             self.log(f"{'✓' if r.passed else '✗'} {r.name}")
         return results
 
+    async def test_session_temporal_bounds(self) -> list[TestResult]:
+        """The gateway denies a session past the Scheme 0 idle/duration bounds."""
+        results = []
+        self._init_gateway()
+        manager = self.gateway.heartbeat_manager
+        now = datetime.now(timezone.utc)
+        ctx = {"role": "provider"}
+
+        async def fresh_session():
+            session = await manager.register_device(DeviceInfo("tb-dev", "simulation"))
+            await manager.process_heartbeat(
+                HeartbeatPayload("tb-dev", session.session_id, 1, now.isoformat(), auth_token="tok")
+            )
+            return session
+
+        session = await fresh_session()
+        decision = await self.gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", ctx)
+        results.append(TestResult(
+            name="Fresh authenticated session is allowed",
+            category="complete_flow",
+            passed=decision.allowed,
+            expected="ALLOWED",
+            actual="ALLOWED" if decision.allowed else "DENIED",
+            notes="; ".join(decision.reasoning_trace[:3])
+        ))
+
+        session = await fresh_session()
+        session.last_heartbeat = now - timedelta(minutes=31)
+        decision = await self.gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", ctx)
+        passed = (not decision.allowed
+                  and any("idle_session_timeout" in v for v in decision.temporal_violations))
+        results.append(TestResult(
+            name="Session idle 31 minutes is denied by □(idle_session_timeout ≤ 30m)",
+            category="complete_flow",
+            passed=passed,
+            expected="DENIED, idle bound named",
+            actual=("DENIED" if not decision.allowed else "ALLOWED") + f" {decision.temporal_violations}"
+        ))
+
+        session = await fresh_session()
+        session.created_at = (now - timedelta(hours=25)).isoformat()
+        decision = await self.gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", ctx)
+        passed = (not decision.allowed
+                  and any("maximum_session_duration" in v for v in decision.temporal_violations))
+        results.append(TestResult(
+            name="Session 25 hours old is denied by □(maximum_session_duration ≤ 24h)",
+            category="complete_flow",
+            passed=passed,
+            expected="DENIED, duration bound named",
+            actual=("DENIED" if not decision.allowed else "ALLOWED") + f" {decision.temporal_violations}"
+        ))
+
+        # Caller-supplied metrics are checked too
+        decision = await self.gateway.check_access(
+            None, "routing_agent", "router", "route_to_registered_agent",
+            {"authenticated": True, "metrics": {"route_retry": 5}}
+        )
+        passed = not decision.allowed and any("route_retry" in v for v in decision.temporal_violations)
+        results.append(TestResult(
+            name="Caller metric route_retry=5 is denied by □(route_retry ≤ 3)",
+            category="complete_flow",
+            passed=passed,
+            expected="DENIED, retry bound named",
+            actual=("DENIED" if not decision.allowed else "ALLOWED") + f" {decision.temporal_violations}"
+        ))
+
+        # The decision latency bound is reported, never enforced
+        decision = await self.gateway.check_access(None, "tool_agent", "patient_records", "read",
+                                                   {"authenticated": True})
+        over = decision.latency_ms > 50
+        reported = any("security_decision" in v for v in decision.temporal_violations)
+        passed = decision.allowed and (reported == over)
+        results.append(TestResult(
+            name="□(security_decision ≤ 50ms) is reported, not enforced",
+            category="complete_flow",
+            passed=passed,
+            expected=f"ALLOWED, reported={over}",
+            actual=f"{'ALLOWED' if decision.allowed else 'DENIED'}, reported={reported} ({decision.latency_ms:.0f}ms)"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
     # =========================================================================
     # Category 5: Heartbeat Sessions
     # =========================================================================
@@ -807,6 +1038,9 @@ class GovernanceTestSuite:
                 self.test_scheme_specific_constraints,
                 self.test_unknown_agent_denied,
                 self.test_scheme_parse_coverage,
+                self.test_conditional_permissions,
+                self.test_conditional_obligations,
+                self.test_temporal_bounds,
             ],
             "classification": [
                 self.test_noevo_agent_classification,
@@ -825,6 +1059,7 @@ class GovernanceTestSuite:
             "complete_flow": [
                 self.test_complete_governance_flow,
                 self.test_governed_tool_decorator,
+                self.test_session_temporal_bounds,
             ],
             "heartbeat": [
                 self.test_heartbeat_missed_count,

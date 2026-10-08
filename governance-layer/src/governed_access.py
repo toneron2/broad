@@ -60,6 +60,7 @@ class GovernanceDecision:
     agent_type: AgentType
     reasoning_trace: list[str] = field(default_factory=list)
     policy_expression: str = ""
+    temporal_violations: list[str] = field(default_factory=list)
     latency_ms: float = 0.0
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -72,6 +73,7 @@ class GovernanceDecision:
             "agent_type": self.agent_type.value,
             "reasoning_trace": self.reasoning_trace,
             "policy_expression": self.policy_expression,
+            "temporal_violations": self.temporal_violations,
             "latency_ms": self.latency_ms,
             "timestamp": self.timestamp
         }
@@ -120,10 +122,16 @@ class GovernanceGateway:
         Complete access control check.
 
         Sequence:
-            1. Check session validity (heartbeat)
+            1. Check session validity (heartbeat) and the session's temporal
+               bounds (idle timeout, maximum duration)
             2. Check guardrails (formal constraints)
             3. Check Logic Engine (multi-paradigm reasoning)
-            4. Return comprehensive decision
+            4. Return comprehensive decision; the decision's own latency is
+               checked against □(security_decision ≤ 50ms) and reported in
+               temporal_violations (not enforced: the decision is made).
+
+        Callers may pass measured values for other □ bounds in
+        context["metrics"] = {"route_retry": 2, ...}.
 
         Args:
             session_id: Heartbeat session ID (None for service-to-service)
@@ -170,6 +178,24 @@ class GovernanceGateway:
             self._log_decision(decision)
             return decision
 
+        # Step 1b: Temporal bounds on the session and any caller-supplied metrics
+        metrics = dict(context.get("metrics") or {})
+        if context.get("idle_seconds") is not None:
+            metrics.setdefault("idle_session_timeout", context["idle_seconds"])
+        if context.get("session_age_seconds") is not None:
+            metrics.setdefault("maximum_session_duration", context["session_age_seconds"])
+        if metrics:
+            bounds_hold, violations = self.enforcer.check_temporal_bounds(agent_name, metrics)
+            if not bounds_hold:
+                decision.temporal_violations = violations
+                reasoning_trace.append("Temporal bounds: VIOLATED")
+                reasoning_trace.extend(f"  {v}" for v in violations)
+                decision.latency_ms = (time.time() - start_time) * 1000
+                decision.reasoning_trace = reasoning_trace
+                self._log_decision(decision)
+                return decision
+            reasoning_trace.append(f"Temporal bounds: OK ({', '.join(sorted(metrics))})")
+
         # Step 2: Guardrails Check
         guardrails_allowed, guardrails_reason = self.enforcer.check_action(
             action=action,
@@ -206,6 +232,17 @@ class GovernanceGateway:
         reasoning_trace.append(f"Final decision: {'ALLOW' if decision.allowed else 'DENY'}")
 
         decision.latency_ms = (time.time() - start_time) * 1000
+
+        # □(security_decision ≤ 50ms): measured after the fact, so reported
+        # rather than enforced. The shell engine cannot meet it (README).
+        _, latency_violations = self.enforcer.check_temporal_bounds(
+            agent_name, {"security_decision": decision.latency_ms / 1000.0}
+        )
+        if latency_violations:
+            decision.temporal_violations.extend(latency_violations)
+            reasoning_trace.append(f"Temporal bound exceeded (reported): {latency_violations[0]}")
+            logger.warning(f"Decision latency bound exceeded: {latency_violations[0]}")
+
         decision.reasoning_trace = reasoning_trace
 
         self._log_decision(decision)

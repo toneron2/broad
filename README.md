@@ -8,7 +8,7 @@ reasoning behind each decision is recorded rather than inferred.
 |---|---|
 | **Status** | Specification and partial implementation. |
 | **Written** | October 2025 – February 2026 |
-| **Runs today** | The shell logic engine (118 tests), the access agent and heartbeat session manager (Python, 99 tests, no transport) |
+| **Runs today** | The shell logic engine (118 tests), the access agent and heartbeat session manager (Python, 133 tests, no transport) |
 | **Does not run** | MCP servers, Terraform deployment, the workflow library's n8n template, the portal |
 | **Successor** | [URGE](https://github.com/toneron2/URGE): the production form of the logic engine, Rust, on crates.io |
 | **Licence** | Copyright 2025–2026 TODOMODO.IO AGENCY LLC. Published to be read; no licence granted. See [`LICENSE`](LICENSE) |
@@ -77,9 +77,9 @@ F(harm_user)   F(bypass_authentication)   F(disable_logging)   F(modify_noevo_ag
 | Component | State |
 |---|---|
 | Logic Engine (shell) | Working for propositional, modal (K, D, T, S4, S5 over frames of 2–3 worlds) and standard deontic logic; `tests/run-tests.sh` passes 118, skips 17 manual checks. Dormant since February 2026; superseded by URGE |
-| Security Agent (`governance-layer/src/access_agent.py`) | Working; `test_governance.py` passes 99 of 99 |
+| Security Agent (`governance-layer/src/access_agent.py`) | Working; `test_governance.py` passes 133 of 133 |
 | Heartbeat session manager (`governance-layer/src/heartbeat.py`) | Working in Python; no QUIC transport under it |
-| Guardrail schemes 0–3 | Defined |
+| Guardrail schemes 0–3 | Defined and enforced: forbidden actions, `← condition` clauses on permissions and obligations, and the 32 numeric `□(metric ≤ limit)` bounds; 14 symbolic bounds (`tool.timeout`, `allocated`) are listed as unenforceable |
 | EVO / NOEVO hierarchy | Specified |
 | W0 heartbeat establishment ([`workflows/`](workflows/)) | Designed as a governed workflow: five gates, each evaluated through URGE. Procurement in process |
 | W1 sensing the locale ([`workflows/`](workflows/)) | Designed as a governed workflow: six gates, FHIR R4 `Device` and `Observation`. Procurement in process |
