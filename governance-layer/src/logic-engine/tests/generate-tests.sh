@@ -343,34 +343,52 @@ generate_esn_tests() {
     local output="${OUTPUT_DIR}/esn-tests.txt"
     echo "# ESN Access Control Test Cases" > "$output"
     echo "# Format: policy|request|expected_decision" >> "$output"
+    echo "# request: facts joined by ∧, ¬ negates, unlisted facts are false; may be empty" >> "$output"
+    echo "# Run through: engines/meta.sh -a POLICY REQUEST" >> "$output"
     echo "" >> "$output"
 
     # Basic access policies
     echo "# === BASIC ACCESS ===" >> "$output"
     echo "O(auth) → P(access)|auth|ALLOW" >> "$output"
-    echo "O(auth) → P(access)|no_auth|DENY" >> "$output"
+    echo "O(auth) → P(access)|¬auth|DENY" >> "$output"
+    echo "O(auth) → P(access)||DENY" >> "$output"
+    echo "P(read)|anything|ALLOW" >> "$output"
 
     # Prohibition
     echo "# === PROHIBITION ===" >> "$output"
     echo "F(admin_access)|admin_access|DENY" >> "$output"
+    echo "F(admin_access) ∧ P(read)|read|ALLOW" >> "$output"
+    echo "F(admin_access) ∧ P(read)|read ∧ admin_access|DENY" >> "$output"
+    echo "O(auth) → F(delete)|auth|DENY" >> "$output"
 
     # Compound policies
     echo "# === COMPOUND ===" >> "$output"
     echo "O(auth) ∧ O(verify) → P(access)|auth ∧ verify|ALLOW" >> "$output"
     echo "O(auth) ∧ O(verify) → P(access)|auth ∧ ¬verify|DENY" >> "$output"
+    echo "O(auth) ∨ O(consent) → P(access)|consent|ALLOW" >> "$output"
+    echo "O(auth) ∧ ¬O(suspended) → P(access)|auth|ALLOW" >> "$output"
+    echo "O(auth) ∧ ¬O(suspended) → P(access)|auth ∧ suspended|DENY" >> "$output"
 
     # Time-based access
     echo "# === TEMPORAL ===" >> "$output"
-    echo "G(O(log)) → P(access)|continuous_logging|ALLOW" >> "$output"
+    echo "G(O(log)) → P(access)|log|ALLOW" >> "$output"
+    echo "G(O(log)) → P(access)|¬log|DENY" >> "$output"
 
     # Role-based
     echo "# === ROLE-BASED ===" >> "$output"
-    echo "O(role=admin) → P(delete)|admin|ALLOW" >> "$output"
-    echo "O(role=admin) → P(delete)|user|DENY" >> "$output"
+    echo "O(role=admin) → P(delete)|role=admin|ALLOW" >> "$output"
+    echo "O(role=admin) → P(delete)|role=user|DENY" >> "$output"
+
+    # The Security Agent's own policy shape
+    echo "# === SECURITY AGENT POLICY ===" >> "$output"
+    echo "(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|auth ∧ role=nurse ∧ session|ALLOW" >> "$output"
+    echo "(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|auth ∧ role=nurse|DENY" >> "$output"
+    echo "(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|role=nurse ∧ session|DENY" >> "$output"
 
     # Conflict detection
     echo "# === CONFLICT DETECTION ===" >> "$output"
-    echo "O(access) ∧ F(access)|any|CONFLICT" >> "$output"
+    echo "O(access) ∧ F(access)|access|CONFLICT" >> "$output"
+    echo "□¬P ∧ O(P)|P|CONFLICT" >> "$output"
 
     echo "Generated $(wc -l < "$output") ESN tests"
 }

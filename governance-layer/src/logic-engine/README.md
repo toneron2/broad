@@ -58,6 +58,10 @@ This implementation demonstrates that the specified Logic Engine architecture (F
 # Multi-paradigm analysis
 ./engines/meta.sh "□O(auth) → P(access)"  # Cross-system analysis
 
+# Access decision: a request's facts against a policy (ALLOW / DENY / CONFLICT)
+./engines/meta.sh -a "(O(auth) ∧ O(role=nurse)) → P(read)" "auth ∧ role=nurse"   # ALLOW
+./engines/meta.sh -a "(O(auth) ∧ O(role=nurse)) → P(read)" "auth"                # DENY
+
 # ESN access control demo
 ./demos/esn-access-control.sh --batch
 ```
@@ -128,7 +132,7 @@ The Logic Engine powers the ESN Access Agent for:
 
 ## Running Tests
 
-The suite passes 118 and skips 17 (combinatorial cases marked CHECK). The engines pin
+The suite passes 140 and skips 17 (combinatorial cases marked CHECK). The `esn` set drives `meta.sh -a` with a policy and a request and checks the decision. The engines pin
 `LC_ALL` to a UTF-8 locale themselves; the multi-byte operators are matched by bracket
 expression and are misread byte by byte in a POSIX locale.
 

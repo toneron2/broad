@@ -209,6 +209,36 @@ run_nlp_tests() {
     done < "$test_file"
 }
 
+run_esn_tests() {
+    local test_file="${TEST_DIR}/esn-tests.txt"
+    if [[ ! -f "$test_file" ]]; then
+        echo "ESN tests not found. Run generate-tests.sh first."
+        return 1
+    fi
+
+    echo ""
+    echo "=== Running ESN Access Control Tests ==="
+    echo ""
+
+    # Format: policy|request|expected_decision   (request may be empty)
+    while IFS='|' read -r policy request expected; do
+        [[ -z "$policy" ]] && continue
+        [[ "$policy" =~ ^# ]] && { echo "$policy"; continue; }
+
+        local result=$("${ENGINE_DIR}/meta.sh" -a "$policy" "$request" 2>&1) || true
+        local decision=$(echo "$result" | grep -E '^DECISION:' | tail -1)
+        if verdict_matches "$decision" "$expected"; then
+            echo -e "${GREEN}PASS${NC}: $policy  |  ${request:-(none)}  -> $expected"
+            PASS=$((PASS+1))
+        else
+            echo -e "${RED}FAIL${NC}: $policy  |  ${request:-(none)}"
+            echo "  Expected: $expected"
+            echo "  Got: ${decision:-$(echo "$result" | head -1)}"
+            FAIL=$((FAIL+1))
+        fi
+    done < "$test_file"
+}
+
 # ============================================================================
 # QUICK SMOKE TESTS
 # ============================================================================
@@ -264,6 +294,7 @@ TEST_SUITES:
     deontic     Deontic logic tests
     meta        Meta-engine tests
     nlp         NLP translation tests
+    esn         ESN access control decisions (meta.sh -a)
 
 OPTIONS:
     -g, --generate    Generate tests before running
@@ -323,6 +354,7 @@ main() {
                 run_deontic_tests
                 run_meta_tests
                 run_nlp_tests
+                run_esn_tests
             fi
             ;;
         smoke)
@@ -342,6 +374,9 @@ main() {
             ;;
         nlp)
             run_nlp_tests
+            ;;
+        esn)
+            run_esn_tests
             ;;
         *)
             echo "Unknown test suite: $suite"

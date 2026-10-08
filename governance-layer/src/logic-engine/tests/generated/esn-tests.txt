@@ -1,18 +1,34 @@
 # ESN Access Control Test Cases
 # Format: policy|request|expected_decision
+# request: facts joined by ∧, ¬ negates, unlisted facts are false; may be empty
+# Run through: engines/meta.sh -a POLICY REQUEST
 
 # === BASIC ACCESS ===
 O(auth) → P(access)|auth|ALLOW
-O(auth) → P(access)|no_auth|DENY
+O(auth) → P(access)|¬auth|DENY
+O(auth) → P(access)||DENY
+P(read)|anything|ALLOW
 # === PROHIBITION ===
 F(admin_access)|admin_access|DENY
+F(admin_access) ∧ P(read)|read|ALLOW
+F(admin_access) ∧ P(read)|read ∧ admin_access|DENY
+O(auth) → F(delete)|auth|DENY
 # === COMPOUND ===
 O(auth) ∧ O(verify) → P(access)|auth ∧ verify|ALLOW
 O(auth) ∧ O(verify) → P(access)|auth ∧ ¬verify|DENY
+O(auth) ∨ O(consent) → P(access)|consent|ALLOW
+O(auth) ∧ ¬O(suspended) → P(access)|auth|ALLOW
+O(auth) ∧ ¬O(suspended) → P(access)|auth ∧ suspended|DENY
 # === TEMPORAL ===
-G(O(log)) → P(access)|continuous_logging|ALLOW
+G(O(log)) → P(access)|log|ALLOW
+G(O(log)) → P(access)|¬log|DENY
 # === ROLE-BASED ===
-O(role=admin) → P(delete)|admin|ALLOW
-O(role=admin) → P(delete)|user|DENY
+O(role=admin) → P(delete)|role=admin|ALLOW
+O(role=admin) → P(delete)|role=user|DENY
+# === SECURITY AGENT POLICY ===
+(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|auth ∧ role=nurse ∧ session|ALLOW
+(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|auth ∧ role=nurse|DENY
+(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|role=nurse ∧ session|DENY
 # === CONFLICT DETECTION ===
-O(access) ∧ F(access)|any|CONFLICT
+O(access) ∧ F(access)|access|CONFLICT
+□¬P ∧ O(P)|P|CONFLICT

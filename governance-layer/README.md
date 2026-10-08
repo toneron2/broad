@@ -50,7 +50,7 @@ cd src/logic-engine
 ./logic "P ∨ ¬P"                    # TAUTOLOGY
 ./logic "O(P) → P(P)"               # VALID (deontic, ought implies can)
 ./logic -s T "□P → P"               # VALID in T (modal; INVALID in K)
-./tests/run-tests.sh                # 118 passed, 17 skipped
+./tests/run-tests.sh                # 140 passed, 17 skipped
 cd .. && python3 test_governance.py # 140 passed
 ```
 
