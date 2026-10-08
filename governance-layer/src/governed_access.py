@@ -44,7 +44,7 @@ from functools import wraps
 
 from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer
 from access_agent import AccessAgent
-from heartbeat import HeartbeatManager, DeviceInfo
+from heartbeat import HeartbeatManager, DeviceInfo, accept_any_token
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("governance")
@@ -158,8 +158,11 @@ class GovernanceGateway:
             agent_type=self.enforcer.get_agent_type(agent_name)
         )
 
-        # Step 1: Session Check (if session_id provided)
+        # Step 1: Session Check (if session_id provided). The first
+        # session-bound check starts the heartbeat monitor, so sessions
+        # degrade and expire without the caller having to remember to.
         if session_id:
+            self.heartbeat_manager.start_monitor()
             session_context = await self.heartbeat_manager.get_session_context(session_id)
             if session_context:
                 decision.session_valid = session_context.get("session_valid", False)
@@ -258,11 +261,14 @@ class GovernanceGateway:
         """
         Start the heartbeat monitor so idle sessions degrade and terminate.
 
-        Without this, a registered session stays ACTIVE forever and the
-        session check in check_access can never fail. Call from within a
-        running event loop.
+        check_access starts it on the first session-bound call; call this to
+        start it earlier. Must run inside an event loop.
         """
         return self.heartbeat_manager.start_monitor()
+
+    def close(self) -> None:
+        """Stop the heartbeat monitor."""
+        self.heartbeat_manager.stop_monitor()
 
     def _log_decision(self, decision: GovernanceDecision):
         """Log decision for audit."""
@@ -452,7 +458,9 @@ if __name__ == "__main__":
         print("Governance Gateway - Complete Demo")
         print("=" * 60)
 
-        gateway = GovernanceGateway()
+        gateway = GovernanceGateway(
+            heartbeat_manager=HeartbeatManager(token_validator=accept_any_token)
+        )
 
         # Register a device
         device = DeviceInfo(
@@ -554,5 +562,6 @@ if __name__ == "__main__":
             print(f"    {entry['timestamp']}: allowed={entry['allowed']}, latency={entry['latency_ms']:.2f}ms")
 
         print("\n" + "=" * 60)
+        gateway.close()
 
     asyncio.run(demo())

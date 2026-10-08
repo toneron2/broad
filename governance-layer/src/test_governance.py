@@ -33,7 +33,7 @@ from datetime import datetime, timedelta, timezone
 from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer, evaluate_condition
 from access_agent import AccessAgent
 from governed_access import GovernanceGateway, governed_mcp_tool
-from heartbeat import HeartbeatManager, HeartbeatPayload, DeviceInfo, SessionState
+from heartbeat import HeartbeatManager, HeartbeatPayload, DeviceInfo, SessionState, accept_any_token
 
 
 @dataclass
@@ -62,7 +62,9 @@ class GovernanceTestSuite:
     def _init_gateway(self):
         """Initialize gateway (expensive, only when needed)."""
         if self.gateway is None:
-            self.gateway = GovernanceGateway()
+            self.gateway = GovernanceGateway(
+                heartbeat_manager=HeartbeatManager(token_validator=accept_any_token)
+            )
 
     def log(self, msg: str):
         """Log if verbose mode."""
@@ -977,6 +979,157 @@ class GovernanceTestSuite:
 
         return results
 
+    async def test_heartbeat_authentication(self) -> list[TestResult]:
+        """Tokens are checked by the configured validator; none means never."""
+        results = []
+        ts = datetime.now(timezone.utc).isoformat()
+
+        # No validator: a token never authenticates
+        manager = HeartbeatManager()
+        session = await manager.register_device(DeviceInfo("auth-1", "simulation"))
+        response = await manager.process_heartbeat(HeartbeatPayload("auth-1", session.session_id, 1, ts, auth_token="tok"))
+        passed = (response["status"] == "ok" and not session.auth_verified
+                  and response.get("auth") == "no_validator"
+                  and not await manager.check_session_health(session.session_id))
+        results.append(TestResult(
+            name="Without a validator a token never authenticates",
+            category="heartbeat",
+            passed=passed,
+            expected="auth_verified=False, auth=no_validator",
+            actual=f"auth_verified={session.auth_verified}, auth={response.get('auth')}"
+        ))
+
+        # A validator decides, per device; a rejected token revokes
+        def only_device_two(token, device_id):
+            return token == "secret" and device_id == "auth-2"
+
+        manager = HeartbeatManager(token_validator=only_device_two)
+        s2 = await manager.register_device(DeviceInfo("auth-2", "simulation"))
+        s3 = await manager.register_device(DeviceInfo("auth-3", "simulation"))
+        r_ok = await manager.process_heartbeat(HeartbeatPayload("auth-2", s2.session_id, 1, ts, auth_token="secret"))
+        r_wrong_dev = await manager.process_heartbeat(HeartbeatPayload("auth-3", s3.session_id, 1, ts, auth_token="secret"))
+        r_none = await manager.process_heartbeat(HeartbeatPayload("auth-2", s2.session_id, 2, ts))
+        still_verified = s2.auth_verified
+        r_bad = await manager.process_heartbeat(HeartbeatPayload("auth-2", s2.session_id, 3, ts, auth_token="wrong"))
+        passed = (r_ok.get("auth") == "verified" and r_wrong_dev.get("auth") == "rejected"
+                  and not s3.auth_verified and "auth" not in r_none and still_verified
+                  and r_bad.get("auth") == "rejected" and not s2.auth_verified)
+        results.append(TestResult(
+            name="Validator verifies per device, no token keeps state, bad token revokes",
+            category="heartbeat",
+            passed=passed,
+            expected="verified / rejected / kept / revoked",
+            actual=f"{r_ok.get('auth')} / {r_wrong_dev.get('auth')} / kept={still_verified} / {r_bad.get('auth')} verified={s2.auth_verified}"
+        ))
+
+        # An async validator and a raising validator
+        async def async_validator(token, device_id):
+            return token == "async-ok"
+
+        def broken_validator(token, device_id):
+            raise RuntimeError("IAM unreachable")
+
+        manager = HeartbeatManager(token_validator=async_validator)
+        s4 = await manager.register_device(DeviceInfo("auth-4", "simulation"))
+        r_async = await manager.process_heartbeat(HeartbeatPayload("auth-4", s4.session_id, 1, ts, auth_token="async-ok"))
+        manager = HeartbeatManager(token_validator=broken_validator)
+        s5 = await manager.register_device(DeviceInfo("auth-5", "simulation"))
+        r_broken = await manager.process_heartbeat(HeartbeatPayload("auth-5", s5.session_id, 1, ts, auth_token="tok"))
+        passed = (r_async.get("auth") == "verified" and s4.auth_verified
+                  and r_broken.get("auth") == "rejected" and not s5.auth_verified)
+        results.append(TestResult(
+            name="Async validator works; a raising validator fails closed",
+            category="heartbeat",
+            passed=passed,
+            expected="verified / rejected",
+            actual=f"{r_async.get('auth')} / {r_broken.get('auth')}"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
+    async def test_heartbeat_lifecycle(self) -> list[TestResult]:
+        """Terminated sessions are purged and the gateway starts the monitor."""
+        results = []
+        now = datetime.now(timezone.utc)
+
+        manager = HeartbeatManager(terminated_retention_seconds=60)
+        kept = await manager.register_device(DeviceInfo("lc-1", "simulation"))
+        old = await manager.register_device(DeviceInfo("lc-2", "simulation"))
+        recent = await manager.register_device(DeviceInfo("lc-3", "simulation"))
+        manager.terminate_session(old.session_id, "test")
+        manager.terminate_session(recent.session_id, "test")
+        old.terminated_at = now - timedelta(seconds=61)
+        recent.terminated_at = now - timedelta(seconds=10)
+        removed = manager.purge_terminated(now)
+        passed = (removed == 1 and old.session_id not in manager.sessions
+                  and recent.session_id in manager.sessions and kept.session_id in manager.sessions)
+        results.append(TestResult(
+            name="Purge removes sessions terminated longer than the retention window",
+            category="heartbeat",
+            passed=passed,
+            expected="1 removed, recent and live kept",
+            actual=f"{removed} removed, sessions={len(manager.sessions)}"
+        ))
+
+        # A late heartbeat to a purged session gets unknown_session, to a
+        # recently terminated one gets session_terminated
+        ts = now.isoformat()
+        r_purged = await manager.process_heartbeat(HeartbeatPayload("lc-2", old.session_id, 1, ts))
+        r_recent = await manager.process_heartbeat(HeartbeatPayload("lc-3", recent.session_id, 1, ts))
+        passed = r_purged.get("error") == "unknown_session" and r_recent.get("error") == "session_terminated"
+        results.append(TestResult(
+            name="Late heartbeats distinguish purged from recently terminated",
+            category="heartbeat",
+            passed=passed,
+            expected="unknown_session / session_terminated",
+            actual=f"{r_purged.get('error')} / {r_recent.get('error')}"
+        ))
+
+        # Monitor pass terminates and later purges without manual calls
+        manager = HeartbeatManager(terminated_retention_seconds=0)
+        session = await manager.register_device(DeviceInfo("lc-4", "simulation"))
+        session.last_heartbeat = now - timedelta(seconds=20)
+        await manager.check_sessions_once(now)
+        terminated = session.state == SessionState.TERMINATED
+        await manager.check_sessions_once(now + timedelta(seconds=1))
+        passed = terminated and session.session_id not in manager.sessions
+        results.append(TestResult(
+            name="Monitor terminates an idle session and purges it after retention",
+            category="heartbeat",
+            passed=passed,
+            expected="terminated then purged",
+            actual=f"terminated={terminated}, present={session.session_id in manager.sessions}"
+        ))
+
+        # The gateway starts the monitor on its first session-bound check
+        gateway = GovernanceGateway(
+            enforcer=self.enforcer,
+            access_agent=AccessAgent(),
+            heartbeat_manager=HeartbeatManager(token_validator=accept_any_token)
+        )
+        before = gateway.heartbeat_manager._monitor_task
+        session = await gateway.heartbeat_manager.register_device(DeviceInfo("lc-5", "simulation"))
+        await gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", {})
+        task = gateway.heartbeat_manager._monitor_task
+        running = task is not None and not task.done()
+        gateway.close()
+        await asyncio.sleep(0)
+        stopped = gateway.heartbeat_manager._monitor_task is None and (task.cancelled() or task.done())
+        passed = before is None and running and stopped
+        results.append(TestResult(
+            name="Gateway starts the heartbeat monitor on first use and close() stops it",
+            category="heartbeat",
+            passed=passed,
+            expected="not running / running / stopped",
+            actual=f"before={before} running={running} stopped={stopped}"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
     async def test_heartbeat_session_integrity(self) -> list[TestResult]:
         """Re-registration, replayed sequence numbers and device mismatch."""
         results = []
@@ -1064,6 +1217,8 @@ class GovernanceTestSuite:
             "heartbeat": [
                 self.test_heartbeat_missed_count,
                 self.test_heartbeat_session_integrity,
+                self.test_heartbeat_authentication,
+                self.test_heartbeat_lifecycle,
             ],
         }
 

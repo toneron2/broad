@@ -28,11 +28,12 @@ COPYRIGHT 2025 TODOMODO.IO AGENCY LLC - ALL RIGHTS RESERVED
 """
 
 import asyncio
+import inspect
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Optional, Callable
+from typing import Awaitable, Callable, Optional, Union
 from uuid import uuid4
 
 # Note: In production, this would use aioquic for actual QUIC transport
@@ -107,10 +108,27 @@ class HeartbeatSession:
     current_rate: HeartbeatRate = HeartbeatRate.IDLE
     auth_verified: bool = False
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    terminated_at: Optional[datetime] = None
 
     # Thresholds
     DEGRADED_THRESHOLD: int = 3   # Missed heartbeats before degraded
     TERMINATE_THRESHOLD: int = 10  # Missed heartbeats before termination
+
+
+# A token validator receives (token, device_id) and returns whether the
+# token authenticates that device. It may be a plain function or a coroutine.
+TokenValidator = Callable[[str, str], Union[bool, Awaitable[bool]]]
+
+
+def accept_any_token(token: str, device_id: str) -> bool:
+    """
+    Validator for simulations and tests ONLY: every non-empty token verifies.
+
+    It is deliberately not the default. A HeartbeatManager with no validator
+    never marks a session authenticated, so a deployment that forgets to
+    wire IAM fails closed rather than open.
+    """
+    return bool(token)
 
 
 class HeartbeatManager:
@@ -121,17 +139,57 @@ class HeartbeatManager:
     an active heartbeat to access BROAD platform resources.
     """
 
-    def __init__(self, on_session_change: Optional[Callable] = None):
+    # How long a TERMINATED session is kept so a late heartbeat gets the
+    # specific "session_terminated" answer instead of "unknown_session".
+    TERMINATED_RETENTION_SECONDS: float = 300.0
+
+    def __init__(
+        self,
+        on_session_change: Optional[Callable] = None,
+        token_validator: Optional[TokenValidator] = None,
+        terminated_retention_seconds: Optional[float] = None,
+    ):
         """
         Initialize the heartbeat manager.
 
         Args:
             on_session_change: Callback when session state changes
+            token_validator: Validates auth tokens carried by heartbeats.
+                None (the default) means no token is ever accepted and no
+                session becomes authenticated through the heartbeat; pass
+                accept_any_token for simulations.
+            terminated_retention_seconds: how long terminated sessions stay
+                in the table before the monitor purges them.
         """
         self.sessions: dict[str, HeartbeatSession] = {}
         self.devices: dict[str, DeviceInfo] = {}
         self.on_session_change = on_session_change
+        self.token_validator = token_validator
+        if terminated_retention_seconds is not None:
+            self.TERMINATED_RETENTION_SECONDS = terminated_retention_seconds
         self._monitor_task: Optional[asyncio.Task] = None
+        if token_validator is None:
+            logger.warning(
+                "HeartbeatManager has no token validator: heartbeats cannot "
+                "authenticate sessions until one is configured"
+            )
+
+    def _terminate(self, session: HeartbeatSession, reason: str) -> None:
+        session.state = SessionState.TERMINATED
+        session.terminated_at = datetime.now(timezone.utc)
+        logger.info(f"Session {session.session_id} terminated: {reason}")
+
+    async def _validate_token(self, token: str, device_id: str) -> bool:
+        if self.token_validator is None:
+            return False
+        try:
+            result = self.token_validator(token, device_id)
+            if inspect.isawaitable(result):
+                result = await result
+            return bool(result)
+        except Exception as e:  # a failing validator must fail closed
+            logger.error(f"Token validator raised for device {device_id}: {e}")
+            return False
 
     async def register_device(self, device: DeviceInfo) -> HeartbeatSession:
         """
@@ -143,11 +201,7 @@ class HeartbeatManager:
         # earlier session for the same device instead of leaving it active.
         for existing in self.sessions.values():
             if existing.device_id == device.device_id and existing.state != SessionState.TERMINATED:
-                existing.state = SessionState.TERMINATED
-                logger.info(
-                    f"Session {existing.session_id} terminated: "
-                    f"device {device.device_id} re-registered"
-                )
+                self._terminate(existing, f"device {device.device_id} re-registered")
                 if self.on_session_change:
                     await self.on_session_change(existing)
 
@@ -224,10 +278,22 @@ class HeartbeatManager:
         session.current_rate = payload.activity_level
         session.missed_count = 0  # Reset on successful heartbeat
 
-        # Verify authentication if provided
+        # Authentication. A token is checked by the configured validator; a
+        # rejected token revokes any earlier verification (the heartbeat is
+        # the continuous-authentication carrier). No token leaves the
+        # session's authentication state as it was.
+        auth_result = None
         if payload.auth_token:
-            # In production: validate token with IAM
-            session.auth_verified = True
+            if await self._validate_token(payload.auth_token, session.device_id):
+                session.auth_verified = True
+                auth_result = "verified"
+            else:
+                session.auth_verified = False
+                auth_result = "rejected" if self.token_validator else "no_validator"
+                logger.warning(
+                    f"Session {session.session_id}: auth token {auth_result} "
+                    f"for device {session.device_id}"
+                )
 
         # Handle bio-signature (future)
         if payload.bio_signature:
@@ -241,13 +307,16 @@ class HeartbeatManager:
             if self.on_session_change:
                 await self.on_session_change(session)
 
-        return {
+        response = {
             "status": "ok",
             "ack_sequence": payload.sequence_number,
             "server_time": datetime.now(timezone.utc).isoformat(),
             "session_state": session.state.value,
             "auth_verified": session.auth_verified
         }
+        if auth_result:
+            response["auth"] = auth_result
+        return response
 
     async def check_session_health(self, session_id: str) -> bool:
         """
@@ -314,11 +383,7 @@ class HeartbeatManager:
             session.missed_count = missed
 
             if missed >= session.TERMINATE_THRESHOLD:
-                session.state = SessionState.TERMINATED
-                logger.warning(
-                    f"Session {session.session_id} TERMINATED "
-                    f"(missed {missed} heartbeats)"
-                )
+                self._terminate(session, f"missed {missed} heartbeats")
                 changed.append(session)
             elif missed >= session.DEGRADED_THRESHOLD and session.state != SessionState.DEGRADED:
                 session.state = SessionState.DEGRADED
@@ -332,7 +397,27 @@ class HeartbeatManager:
             for session in changed:
                 await self.on_session_change(session)
 
+        self.purge_terminated(now)
         return changed
+
+    def purge_terminated(self, now: Optional[datetime] = None) -> int:
+        """
+        Drop sessions that have been TERMINATED for longer than the
+        retention window, so the table does not grow without bound.
+        Returns the number removed.
+        """
+        now = now or datetime.now(timezone.utc)
+        expired = [
+            sid for sid, s in self.sessions.items()
+            if s.state == SessionState.TERMINATED
+            and s.terminated_at is not None
+            and (now - s.terminated_at).total_seconds() > self.TERMINATED_RETENTION_SECONDS
+        ]
+        for sid in expired:
+            del self.sessions[sid]
+        if expired:
+            logger.info(f"Purged {len(expired)} terminated session(s)")
+        return len(expired)
 
     async def monitor_sessions(self, poll_interval: float = 0.1):
         """
@@ -362,8 +447,7 @@ class HeartbeatManager:
         """Manually terminate a session."""
         session = self.sessions.get(session_id)
         if session:
-            session.state = SessionState.TERMINATED
-            logger.info(f"Session {session_id} terminated: {reason}")
+            self._terminate(session, reason)
 
 
 class HeartbeatClient:
@@ -518,8 +602,8 @@ if __name__ == "__main__":
         print("QUIC Heartbeat Protocol - Demo")
         print("=" * 60)
 
-        # Create manager
-        manager = HeartbeatManager()
+        # Create manager. The demo accepts any token; production wires IAM.
+        manager = HeartbeatManager(token_validator=accept_any_token)
 
         # Register a device
         device = DeviceInfo(
@@ -567,6 +651,7 @@ if __name__ == "__main__":
             agent = AccessAgent()
 
             governed_manager = GovernedHeartbeatManager(access_agent=agent)
+            governed_manager.token_validator = accept_any_token
             await governed_manager.register_device(device)
 
             # Simulate heartbeat
