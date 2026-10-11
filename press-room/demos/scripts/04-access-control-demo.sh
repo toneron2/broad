@@ -98,25 +98,14 @@ echo ""
 
 cd "${LOGIC_ENGINE}"
 
-echo -e "  ${BOLD}1. Deontic Check:${NC} P(view_phi) ← role = provider"
-echo -n "     Expression: "
-echo -e "${CYAN}P(view_phi) ← authenticated ∧ role_provider${NC}"
-echo -n "     Result: "
-./logic "P(view_phi) ← (authenticated ∧ role_provider)"
-echo ""
+# One policy, three paradigms: deontic O(role_provider), modal □session_valid,
+# temporal G(shift_hours). meta.sh -a decides a request's facts against it.
+PHI_POLICY="(O(authenticated) ∧ O(role_provider) ∧ □session_valid ∧ G(shift_hours)) → P(view_phi)"
 
-echo -e "  ${BOLD}2. Modal Check:${NC} ◇(access) given context"
-echo -n "     Expression: "
-echo -e "${CYAN}◇(access) ← session_valid${NC}"
+echo -e "  ${BOLD}Policy:${NC} ${CYAN}${PHI_POLICY}${NC}"
+echo -e "  ${BOLD}Request facts:${NC} ${CYAN}authenticated ∧ role_provider ∧ session_valid ∧ shift_hours${NC}"
 echo -n "     Result: "
-./logic "◇(access) ← session_valid"
-echo ""
-
-echo -e "  ${BOLD}3. Temporal Check:${NC} □[shift_start,shift_end](access_permitted)"
-echo -n "     Expression: "
-echo -e "${CYAN}□(shift_hours → P(access))${NC}"
-echo -n "     Result: "
-./logic "□(shift_hours → P(access))"
+./engines/meta.sh -a "$PHI_POLICY" "authenticated ∧ role_provider ∧ session_valid ∧ shift_hours" | tail -1
 echo ""
 
 echo -e "  ${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -159,6 +148,9 @@ echo ""
 echo -e "  ${BOLD}1. Deontic Check:${NC} P(view_phi) ← role ∈ clinical_roles"
 echo -n "     Expression: "
 echo -e "${CYAN}¬P(view_phi) ← role = IT_admin${NC}"
+echo -e "  ${BOLD}Request facts:${NC} ${CYAN}authenticated ∧ role_it_admin ∧ session_valid ∧ shift_hours${NC}"
+echo -n "     Result: "
+./engines/meta.sh -a "$PHI_POLICY" "authenticated ∧ role_it_admin ∧ session_valid ∧ shift_hours" | tail -1
 echo ""
 echo -e "     ${RED}FAIL: IT_admin ∉ clinical_roles${NC}"
 echo ""

@@ -60,7 +60,8 @@ target belongs to URGE.
 
 **Policies and requests are kept apart.** Who may do what is written in
 [`governance-layer/src/policies/access.policy`](governance-layer/src/policies/access.policy),
-one line per resource and action:
+one line per resource and action. Its eight lines are starting policies for the resources
+the demos and tests use; the access rules for a deployment are still to be written.
 
 ```
 patient_records.read: (O(auth) ∧ (O(role=nurse) ∨ O(role=provider) ∨ O(role=admin)) ∧ □session) → P(read_patient_records)

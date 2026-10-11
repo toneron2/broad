@@ -62,16 +62,13 @@ scenario_bio_auth() {
     echo "  (Obligation to authenticate implies Permission to access)"
     echo ""
 
-    demo_step "Evaluating policy validity..."
-    result=$("$LOGIC" "O(auth) → P(access)" 2>&1) || true
+    demo_step "Checking user request: authenticated=true"
+    result=$("${ENGINE_DIR}/meta.sh" -a "O(auth) → P(access)" "auth" 2>&1 | tail -1) || true
     demo_result "$result"
 
-    demo_step "Checking user request: authenticated=true"
-    result=$("${ENGINE_DIR}/deontic.sh" -t "O(auth) → P(access)" 2>&1) || true
-    demo_result "Policy CONSISTENT, user authenticated - Access GRANTED"
-
     demo_step "Checking user request: authenticated=false"
-    demo_deny "Policy requires authentication - Access DENIED"
+    result=$("${ENGINE_DIR}/meta.sh" -a "O(auth) → P(access)" "¬auth" 2>&1 | tail -1) || true
+    demo_deny "$result"
 }
 
 # ============================================================================
@@ -149,9 +146,9 @@ scenario_privacy() {
     echo "  □(O(log_access)) → P(audit)"
     echo ""
 
-    demo_step "Checking policy for data request with consent..."
-    result=$("$LOGIC" "O(consent) → P(access)" 2>&1) || true
-    demo_result "$result - Data access ALLOWED with consent"
+    demo_step "Checking a data request with consent..."
+    result=$("${ENGINE_DIR}/meta.sh" -a "O(consent) → P(data_access)" "consent" 2>&1 | tail -1) || true
+    demo_result "$result"
 
     demo_step "Checking policy for data transfer without consent..."
     result=$("${ENGINE_DIR}/deontic.sh" -t "F(transfer) ∧ O(transfer)" 2>&1) || true
@@ -159,9 +156,9 @@ scenario_privacy() {
         demo_deny "CONFLICT DETECTED - Cannot both forbid and require transfer"
     fi
 
-    demo_step "Checking audit requirement..."
-    result=$("$LOGIC" "□O(log) → P(audit)" 2>&1) || true
-    demo_result "$result - Audit trail ENFORCED"
+    demo_step "Checking an audit request with access logging on..."
+    result=$("${ENGINE_DIR}/meta.sh" -a "□O(log_access) → P(audit)" "log_access" 2>&1 | tail -1) || true
+    demo_result "$result"
 }
 
 # ============================================================================
