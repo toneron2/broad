@@ -8,7 +8,7 @@ reasoning behind each decision is recorded rather than inferred.
 |---|---|
 | **Status** | Specification and partial implementation. |
 | **Written** | October 2025 – February 2026 |
-| **Runs today** | The shell logic engine (118 tests), the access agent and heartbeat session manager (Python, 99 tests, no transport) |
+| **Runs today** | The shell logic engine (140 tests), the access agent and heartbeat session manager (Python, 99 tests, no transport) |
 | **Does not run** | MCP servers, Terraform deployment, the workflow library's n8n template, the portal |
 | **Successor** | [URGE](https://github.com/toneron2/URGE): the production form of the logic engine, Rust, on crates.io |
 | **Licence** | Copyright 2025–2026 TODOMODO.IO AGENCY LLC. Published to be read; no licence granted. See [`LICENSE`](LICENSE) |
@@ -76,7 +76,7 @@ F(harm_user)   F(bypass_authentication)   F(disable_logging)   F(modify_noevo_ag
 
 | Component | State |
 |---|---|
-| Logic Engine (shell) | Working for propositional, modal (K, D, T, S4, S5 over frames of 2–3 worlds) and standard deontic logic; `tests/run-tests.sh` passes 118, skips 17 manual checks. Dormant since February 2026; superseded by URGE |
+| Logic Engine (shell) | Working for propositional, modal (K, D, T, S4, S5 over frames of 2–3 worlds) and standard deontic logic; `tests/run-tests.sh` passes 140, skips 17 manual checks. Dormant since February 2026; superseded by URGE |
 | Security Agent (`governance-layer/src/access_agent.py`) | Working; `test_governance.py` passes 99 of 99 |
 | Heartbeat session manager (`governance-layer/src/heartbeat.py`) | Working in Python; no QUIC transport under it |
 | Guardrail schemes 0–3 | Defined |
