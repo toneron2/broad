@@ -346,6 +346,32 @@ fact_holds() {
     return 1
 }
 
+# Does one projected conjunct of an antecedent hold under the request's facts?
+# A bare atom, or a disjunction of bare atoms (every line in access.policy), is
+# decided here without starting a process; anything else is substituted and
+# handed to the boolean engine, as the whole antecedent is.
+conj_holds() {
+    local c rest alt atom
+    strip_outer_parens "$1"; c="$STRIPPED"
+    if [[ "$c" != *"∧"* && "$c" != *"¬"* && "$c" != *"→"* && "$c" != *"↔"* ]]; then
+        rest="$c"
+        while :; do
+            if split_top_level "$rest" "∨"; then alt="$SPLIT_LEFT"; rest="$SPLIT_RIGHT"
+            else alt="$rest"; rest=""; fi
+            strip_outer_parens "$alt"; alt="$STRIPPED"
+            [[ "$alt" == *"("* || "$alt" == *"∨"* ]] && break   # nested: the boolean engine decides
+            fact_holds "$alt" && return 0
+            [[ -z "$rest" ]] && return 1
+        done
+    fi
+    local part="$c"
+    for atom in $(extract_atoms "$c"); do
+        if fact_holds "$atom"; then part=$(echo "$part" | sed -E "s/\b${atom}\b/⊤/g")
+        else part=$(echo "$part" | sed -E "s/\b${atom}\b/⊥/g"); fi
+    done
+    [[ "$("${ENGINE_DIR}/boolean.sh" "$part" 2>&1 | head -1)" != CONTRADICTION ]]
+}
+
 esn_access_decision() {
     local policy="$1"
     local request="${2:-}"
@@ -430,20 +456,13 @@ esn_access_decision() {
             # Name the top-level conjuncts that fail, not every false atom: under
             # auth ∧ (role=nurse ∨ role=provider) ∧ session, a nurse without a
             # session is missing "session", not the roles she does not hold.
-            local unmet="" rest conj part
+            local unmet="" rest conj
             strip_outer_parens "$projected"; rest="$STRIPPED"
             while :; do
                 if split_top_level "$rest" "∧"; then conj="$SPLIT_LEFT"; rest="$SPLIT_RIGHT"
                 else conj="$rest"; rest=""; fi
                 strip_outer_parens "$conj"; conj="$STRIPPED"
-                part="$conj"
-                for atom in $(extract_atoms "$conj"); do
-                    if fact_holds "$atom"; then part=$(echo "$part" | sed -E "s/\b${atom}\b/⊤/g")
-                    else part=$(echo "$part" | sed -E "s/\b${atom}\b/⊥/g"); fi
-                done
-                if [[ "$("${ENGINE_DIR}/boolean.sh" "$part" 2>&1 | head -1)" == CONTRADICTION ]]; then
-                    unmet="${unmet:+$unmet,} $(echo "$conj" | sed -E 's/\(([^()]+)\)/\1/g')"
-                fi
+                conj_holds "$conj" || unmet="${unmet:+$unmet,} $(echo "$conj" | sed -E 's/\(([^() ]+)\)/\1/g')"
                 [[ -z "$rest" ]] && break
             done
             echo ""
