@@ -671,6 +671,36 @@ class GovernanceTestSuite:
 
         return results
 
+    def test_denial_names_unmet_conditions(self) -> list[TestResult]:
+        """A denial names the policy conditions the request fails, and only those."""
+        results = []
+        agent = AccessAgent()
+
+        test_cases = [
+            ({"authenticated": True, "role": "nurse"}, "session"),
+            ({"role": "nurse", "session_valid": True}, "auth"),
+            ({"authenticated": True, "role": "janitor", "session_valid": True},
+             "role=nurse ∨ role=provider ∨ role=admin"),
+            ({"session_valid": True}, "auth, role=nurse ∨ role=provider ∨ role=admin"),
+        ]
+
+        for context, unmet in test_cases:
+            decision = agent.check_access(resource="patient_records", action="read", context=context)
+            expected = f"DECISION: DENY (precondition not met: {unmet})"
+            actual = next((l.strip() for l in decision.reasoning_trace.splitlines()
+                           if l.strip().startswith("DECISION:")), "")
+            passed = not decision.allowed and actual == expected
+            results.append(TestResult(
+                name=f"Denial names only: {unmet}",
+                category="logic_engine",
+                passed=passed,
+                expected=expected,
+                actual=actual
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
     def test_identifier_validation(self) -> list[TestResult]:
         """Values that are not bare identifiers never reach the shell engines."""
         results = []
@@ -1323,6 +1353,7 @@ class GovernanceTestSuite:
                 self.test_policy_store,
                 self.test_policy_parity_with_engine,
                 self.test_authentication_required,
+                self.test_denial_names_unmet_conditions,
                 self.test_identifier_validation,
                 self.test_role_permissions,
             ],

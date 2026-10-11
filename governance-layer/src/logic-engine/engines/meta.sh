@@ -427,8 +427,25 @@ esn_access_decision() {
     case "$verdict" in
         TAUTOLOGY) ;;
         CONTRADICTION)
-            local unmet=""
-            for atom in $atoms; do fact_holds "$atom" || unmet="$unmet $atom"; done
+            # Name the top-level conjuncts that fail, not every false atom: under
+            # auth ∧ (role=nurse ∨ role=provider) ∧ session, a nurse without a
+            # session is missing "session", not the roles she does not hold.
+            local unmet="" rest conj part
+            strip_outer_parens "$projected"; rest="$STRIPPED"
+            while :; do
+                if split_top_level "$rest" "∧"; then conj="$SPLIT_LEFT"; rest="$SPLIT_RIGHT"
+                else conj="$rest"; rest=""; fi
+                strip_outer_parens "$conj"; conj="$STRIPPED"
+                part="$conj"
+                for atom in $(extract_atoms "$conj"); do
+                    if fact_holds "$atom"; then part=$(echo "$part" | sed -E "s/\b${atom}\b/⊤/g")
+                    else part=$(echo "$part" | sed -E "s/\b${atom}\b/⊥/g"); fi
+                done
+                if [[ "$("${ENGINE_DIR}/boolean.sh" "$part" 2>&1 | head -1)" == CONTRADICTION ]]; then
+                    unmet="${unmet:+$unmet,} $(echo "$conj" | sed -E 's/\(([^()]+)\)/\1/g')"
+                fi
+                [[ -z "$rest" ]] && break
+            done
             echo ""
             echo "DECISION: DENY (precondition not met:${unmet:- antecedent false})"
             return 1 ;;
