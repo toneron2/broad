@@ -1,0 +1,65 @@
+# Runs both test suites on every push and pull request.
+#
+# The logic engine job deliberately runs with LC_ALL=C: the engines pin a
+# UTF-8 locale themselves, and this job proves that pin works. Before it was
+# added, the shell suite had 32 failures in a POSIX locale that nobody saw.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  logic-engine:
+    name: logic engine (shell)
+    runs-on: ubuntu-latest
+    env:
+      LC_ALL: C
+      LANG: C
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check every shell script
+        run: |
+          set -e
+          find . -path ./.git -prune -o \( -name '*.sh' -o -name 'logic' -o -name 'nlp' \) -type f -print0 \
+            | xargs -0 -n1 bash -n
+
+      - name: Regenerate and run the suite
+        working-directory: governance-layer/src/logic-engine
+        run: ./tests/run-tests.sh -g all
+
+      - name: Router works without a UTF-8 locale
+        working-directory: governance-layer/src/logic-engine
+        run: |
+          out=$(./logic "P ∨ ¬P")
+          test "$out" = "TAUTOLOGY" || { echo "expected TAUTOLOGY, got: $out"; exit 1; }
+
+  governance:
+    name: governance layer (python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Byte-compile
+        run: python -m compileall -q governance-layer/src healthcare-workflow-library/mcp-server/src
+
+      - name: Run test_governance.py
+        working-directory: governance-layer/src
+        run: python test_governance.py
+
+      - name: Run the module demos
+        working-directory: governance-layer/src
+        run: |
+          python guardrails_loader.py
+          python access_agent.py
+          python heartbeat.py
+          python governed_access.py
