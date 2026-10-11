@@ -11,7 +11,7 @@ here are the record of the design.
 | | |
 |---|---|
 | **Specifications** | six, October–November 2025, in [`specs/`](specs/), each with a forward note in [`specs/README.md`](specs/README.md) |
-| **Code** | [`src/`](src/): the shell logic engine (about 4,700 lines), `access_agent.py` (442 lines), `heartbeat.py` (522 lines), four guardrail schemes, the access policies in `src/policies/`, `test_governance.py` (162 tests pass) |
+| **Code** | [`src/`](src/): the shell logic engine (about 4,700 lines), `access_agent.py` (562 lines), `heartbeat.py` (681 lines), four guardrail schemes, the access policies in `src/policies/`, `test_governance.py` (162 tests pass) |
 | **Specification document** | [`patents/`](patents/): the Logic Engine specification, September 2025, copyright-registered; patent pending |
 | **Archive** | [`docs/archive/`](docs/archive/): the seed documents, 2025 planning and outreach drafts, setup logs |
 

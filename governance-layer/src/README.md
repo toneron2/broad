@@ -23,7 +23,7 @@ src/
 
 The governance layer runs with:
 
-1. **Logic Engine** - Working multi-paradigm formal reasoning (~4,300 lines)
+1. **Logic Engine** - Working multi-paradigm formal reasoning (~4,700 lines)
 2. **Access Agent** - Governance gateway calling Logic Engine for decisions
 3. **Heartbeat Protocol** - Session management and authentication state
 
