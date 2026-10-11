@@ -32,6 +32,7 @@ from datetime import datetime, timedelta, timezone
 # Import governance components
 from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer, evaluate_condition
 from access_agent import AccessAgent
+from access_policies import PolicyStore
 from governed_access import GovernanceGateway, governed_mcp_tool
 from heartbeat import HeartbeatManager, HeartbeatPayload, DeviceInfo, SessionState, accept_any_token
 
@@ -444,11 +445,10 @@ class GovernanceTestSuite:
         try:
             agent = AccessAgent()
 
-            # Test tautology
             decision = agent.check_access(
-                resource="test",
-                action="test",
-                context={"authenticated": True, "role": "admin"}
+                resource="patient_records",
+                action="read",
+                context={"authenticated": True, "role": "admin", "session_valid": True}
             )
 
             result = TestResult(
@@ -472,54 +472,167 @@ class GovernanceTestSuite:
 
         return results
 
-    def test_policy_expression_generation(self) -> list[TestResult]:
-        """Test that policy expressions are generated correctly."""
+    def test_request_facts(self) -> list[TestResult]:
+        """The request's context becomes facts; the policy comes from the store."""
         results = []
-
         agent = AccessAgent()
+        stored = agent.policies.lookup("patient_records", "read").expression
 
         test_cases = [
-            {
-                "context": {"authenticated": True},
-                "expected_contains": "O(auth)"
-            },
-            {
-                "context": {"role": "provider"},
-                "expected_contains": "O(role=provider)"
-            },
-            {
-                "context": {"session_valid": True},
-                "expected_contains": "□session"
-            },
-            {
-                "context": {},  # No context = forbidden
-                "expected_contains": "F("
-            },
+            ({"authenticated": True}, "auth"),
+            ({"role": "provider"}, "role=provider"),
+            ({"session_valid": True}, "session"),
+            ({"consent": True}, "consent"),
+            ({"facts": ["verified"]}, "verified"),
         ]
 
-        for tc in test_cases:
-            decision = agent.check_access(
-                resource="test",
-                action="test",
-                context=tc["context"]
-            )
-
-            passed = tc["expected_contains"] in decision.policy_expression
-
-            result = TestResult(
-                name=f"Policy contains {tc['expected_contains']}",
+        for context, expected_fact in test_cases:
+            decision = agent.check_access("patient_records", "read", context)
+            facts = decision.request_facts.split(" ∧ ")
+            passed = expected_fact in facts and decision.policy_expression == stored
+            results.append(TestResult(
+                name=f"Context {context} becomes fact {expected_fact}; policy is the stored one",
                 category="logic_engine",
                 passed=passed,
-                expected=tc["expected_contains"],
-                actual=decision.policy_expression[:50] + "..."
-            )
-            results.append(result)
-            self.log(f"{'✓' if result.passed else '✗'} {result.name}")
+                expected=f"{expected_fact} in facts, stored policy",
+                actual=f"facts=[{decision.request_facts}] policy_is_stored={decision.policy_expression == stored}"
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        decision = agent.check_access("patient_records", "read", {})
+        passed = decision.request_facts == "" and decision.policy_expression == stored and not decision.allowed
+        results.append(TestResult(
+            name="Empty context: no facts, stored policy, denied",
+            category="logic_engine",
+            passed=passed,
+            expected="no facts, denied",
+            actual=f"facts=[{decision.request_facts}] allowed={decision.allowed}"
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_policy_store(self) -> list[TestResult]:
+        """Policies load from policies/access.policy with wildcard precedence."""
+        results = []
+        agent = AccessAgent()
+        store = agent.policies
+
+        passed = len(store) >= 8 and not store.rejected
+        results.append(TestResult(
+            name=f"Policy file loads cleanly ({len(store)} policies)",
+            category="logic_engine",
+            passed=passed,
+            expected=">= 8 policies, 0 rejected",
+            actual=f"{len(store)} policies, rejected={store.rejected}"
+        ))
+
+        exact = store.lookup("patient_records", "delete")
+        wildcard = store.lookup("patient_records", "export")
+        none = store.lookup("launch_codes", "read")
+        passed = (exact is not None and "role=admin" in exact.expression
+                  and wildcard is not None and wildcard.action == "*"
+                  and none is None)
+        results.append(TestResult(
+            name="Lookup: exact beats resource.*; unknown resource has no policy",
+            category="logic_engine",
+            passed=passed,
+            expected="exact / wildcard / None",
+            actual=f"{exact and exact.key} / {wildcard and wildcard.key} / {none}"
+        ))
+
+        # Decisions that follow from the store
+        cases = [
+            ("patient_records", "export", {"authenticated": True, "role": "admin", "session_valid": True},
+             False, "resource.* prohibition"),
+            ("launch_codes", "read", {"authenticated": True, "role": "admin", "session_valid": True},
+             False, "no policy at all"),
+            ("patient_records", "delete", {"authenticated": True, "role": "admin", "session_valid": True},
+             True, "admin may delete"),
+            ("patient_records", "delete", {"authenticated": True, "role": "nurse", "session_valid": True},
+             False, "nurse may not delete"),
+            ("patient_records", "write", {"authenticated": True, "role": "provider", "session_valid": True},
+             False, "write without consent"),
+            ("patient_records", "write",
+             {"authenticated": True, "role": "provider", "session_valid": True, "consent": True},
+             True, "write with consent"),
+            ("workflow", "deploy", {"authenticated": True, "role": "admin"}, False, "deploy unverified"),
+            ("workflow", "deploy", {"authenticated": True, "role": "admin", "facts": ["verified"]},
+             True, "deploy verified (fact from context)"),
+        ]
+        for resource, action, context, expected, label in cases:
+            decision = agent.check_access(resource, action, context)
+            passed = decision.allowed == expected
+            results.append(TestResult(
+                name=f"{resource}.{action}: {label}",
+                category="logic_engine",
+                passed=passed,
+                expected="ALLOWED" if expected else "DENIED",
+                actual="ALLOWED" if decision.allowed else "DENIED",
+                notes=decision.reasoning_trace.splitlines()[0]
+            ))
+
+        # A malformed or unsafe policy line is refused at load time
+        import tempfile as _tf
+        with _tf.NamedTemporaryFile("w", suffix=".policy", delete=False) as f:
+            f.write("good.read: O(auth) → P(read)\n")
+            f.write("bad.read: O(auth) → P(read) ; rm -rf /\n")
+            f.write("this is not a policy line\n")
+            f.write("worse.read: O(auth) → P(`id`)\n")
+            tmp = f.name
+        try:
+            small = PolicyStore(tmp)
+            passed = len(small) == 1 and small.lookup("good", "read") is not None and len(small.rejected) == 3
+            results.append(TestResult(
+                name="Unsafe or malformed policy lines are rejected at load",
+                category="logic_engine",
+                passed=passed,
+                expected="1 loaded, 3 rejected",
+                actual=f"{len(small)} loaded, {len(small.rejected)} rejected"
+            ))
+        finally:
+            os.remove(tmp)
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
+    def test_policy_parity_with_engine(self) -> list[TestResult]:
+        """The Python agent and meta.sh -a decide the same cases the same way."""
+        import re
+        import subprocess
+        from access_agent import META_ENGINE
+        results = []
+        agent = AccessAgent()
+        policy = agent.policies.lookup("patient_records", "read").expression
+
+        cases = [
+            ("auth ∧ role=nurse ∧ session", {"authenticated": True, "role": "nurse", "session_valid": True}),
+            ("auth ∧ role=nurse", {"authenticated": True, "role": "nurse"}),
+            ("role=nurse ∧ session", {"role": "nurse", "session_valid": True}),
+            ("auth ∧ role=janitor ∧ session", {"authenticated": True, "role": "janitor", "session_valid": True}),
+            ("auth", {"authenticated": True}),
+            ("", {}),
+        ]
+        for facts, context in cases:
+            out = subprocess.run([str(META_ENGINE), "-a", policy, facts], capture_output=True, text=True).stdout
+            engine = re.findall(r"^DECISION: (\w+)", out, re.M)[-1]
+            decision = agent.check_access("patient_records", "read", context)
+            python = "ALLOW" if decision.allowed else "DENY"
+            passed = engine == python and decision.request_facts == facts
+            results.append(TestResult(
+                name=f"Parity on facts [{facts or 'none'}]",
+                category="logic_engine",
+                passed=passed,
+                expected=f"engine {engine}",
+                actual=f"python {python}, facts=[{decision.request_facts}]"
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
 
         return results
 
     def test_authentication_required(self) -> list[TestResult]:
-        """No context flag other than authentication can grant access."""
+        """Access requires authentication and the policy's preconditions."""
         results = []
         agent = AccessAgent()
 
@@ -529,9 +642,14 @@ class GovernanceTestSuite:
             ({"session_valid": True}, False, "valid session alone"),
             ({"role": "provider", "consent": True, "session_valid": True}, False,
              "everything except authentication"),
-            ({"authenticated": True}, True, "authentication alone"),
+            ({"authenticated": True}, False, "authentication alone (policy needs role and session)"),
+            ({"authenticated": True, "role": "provider"}, False, "authenticated provider without session"),
+            ({"authenticated": True, "role": "janitor", "session_valid": True}, False,
+             "authenticated janitor with session (role not permitted)"),
             ({"authenticated": True, "role": "provider", "session_valid": True}, True,
-             "authentication with role and session"),
+             "authenticated provider with session"),
+            ({"authenticated": True, "role": "nurse", "session_valid": True}, True,
+             "authenticated nurse with session"),
         ]
 
         for context, expected_allowed, label in test_cases:
@@ -895,7 +1013,7 @@ class GovernanceTestSuite:
 
         # The decision latency bound is reported, never enforced
         decision = await self.gateway.check_access(None, "tool_agent", "patient_records", "read",
-                                                   {"authenticated": True})
+                                                   {"authenticated": True, "role": "provider", "session_valid": True})
         over = decision.latency_ms > 50
         reported = any("security_decision" in v for v in decision.temporal_violations)
         passed = decision.allowed and (reported == over)
@@ -1201,7 +1319,9 @@ class GovernanceTestSuite:
             ],
             "logic_engine": [
                 self.test_logic_engine_available,
-                self.test_policy_expression_generation,
+                self.test_request_facts,
+                self.test_policy_store,
+                self.test_policy_parity_with_engine,
                 self.test_authentication_required,
                 self.test_identifier_validation,
                 self.test_role_permissions,
