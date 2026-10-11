@@ -8,7 +8,7 @@ reasoning behind each decision is recorded rather than inferred.
 |---|---|
 | **Status** | Specification and partial implementation. |
 | **Written** | October 2025 – February 2026 |
-| **Runs today** | The shell logic engine, the access agent and its 57 tests, the heartbeat session manager (Python, no transport) |
+| **Runs today** | The shell logic engine (140 tests), the access agent and heartbeat session manager (Python, 162 tests, no transport) |
 | **Does not run** | MCP servers, Terraform deployment, the workflow library's n8n template, the portal |
 | **Successor** | [URGE](https://github.com/toneron2/URGE): the production form of the logic engine, Rust, on crates.io |
 | **Licence** | Copyright 2025–2026 TODOMODO.IO AGENCY LLC. Published to be read; no licence granted. See [`LICENSE`](LICENSE) |
@@ -45,9 +45,10 @@ The request is classified into the logic paradigms it involves by pattern matchi
 language model, then evaluated in each and returned as a verdict with its derivation.
 
 ```console
-$ ./logic "P ∨ ¬P"                    # TAUTOLOGY
-$ ./logic "O(auth) → P(access)"       # VALID          (deontic)
-$ ./logic "□P → P"                    # T-AXIOM        (modal, reflexivity)
+$ ./logic "P ∨ ¬P"                         # TAUTOLOGY
+$ ./logic "O(P) → P(P)"                    # VALID          (deontic, ought implies can)
+$ ./logic -s T "□P → P"                    # VALID in T     (modal, reflexive frames; INVALID in K)
+$ ./engines/deontic.sh -t "O(x) ∧ F(x)"    # INCONSISTENT
 $ ./core/identify.sh "□O(auth) → P(access)"
 PRIMARY:deontic
 PARADIGMS:boolean modal deontic
@@ -56,6 +57,24 @@ PARADIGMS:boolean modal deontic
 These run today against `governance-layer/src/logic-engine/`: four engines, about 4,700
 lines of shell, awk and sed. It is a proof of correctness, not of speed; the sub-50 ms
 target belongs to URGE.
+
+**Policies and requests are kept apart.** Who may do what is written in
+[`governance-layer/src/policies/access.policy`](governance-layer/src/policies/access.policy),
+one line per resource and action:
+
+```
+patient_records.read: (O(auth) ∧ (O(role=nurse) ∨ O(role=provider) ∨ O(role=admin)) ∧ □session) → P(read_patient_records)
+```
+
+The Security Agent turns a request's context into facts (`auth ∧ role=nurse ∧ session`) and
+the engine decides the facts against the policy: ALLOW, DENY naming the unmet precondition,
+or CONFLICT if the policy is inconsistent. A resource with no policy is denied, and
+authentication is required for every ALLOW whatever the policy says.
+
+```console
+$ ./engines/meta.sh -a "(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)" "auth ∧ role=nurse"
+DECISION: DENY (precondition not met: session)
+```
 
 **Agents are classified by whether they may change.** A **NOEVO** agent is fixed after
 deployment and formally verifiable. An **EVO** agent may adapt within guardrails but cannot
@@ -72,10 +91,10 @@ F(harm_user)   F(bypass_authentication)   F(disable_logging)   F(modify_noevo_ag
 
 | Component | State |
 |---|---|
-| Logic Engine (shell) | Working. Dormant since February 2026; superseded by URGE |
-| Security Agent (`governance-layer/src/access_agent.py`) | Working; `test_governance.py` passes 57 of 57 |
-| Heartbeat session manager (`governance-layer/src/heartbeat.py`) | Working in Python; no QUIC transport under it |
-| Guardrail schemes 0–3 | Defined |
+| Logic Engine (shell) | Working for propositional, modal (K, D, T, S4, S5 over frames of 2–3 worlds) and standard deontic logic; `tests/run-tests.sh` passes 140, skips 17 manual checks. Dormant since February 2026; superseded by URGE |
+| Security Agent (`governance-layer/src/access_agent.py`) | Working; decides request facts against `policies/access.policy` through the engine; `test_governance.py` passes 162 of 162 |
+| Heartbeat session manager (`governance-layer/src/heartbeat.py`) | Working in Python; no QUIC transport under it. Token validation is a hook (`token_validator`); without one, no session authenticates |
+| Guardrail schemes 0–3 | Defined and enforced: forbidden actions, `← condition` clauses on permissions and obligations, and the 32 numeric `□(metric ≤ limit)` bounds; 14 symbolic bounds (`tool.timeout`, `allocated`) are listed as unenforceable |
 | EVO / NOEVO hierarchy | Specified |
 | W0 heartbeat establishment ([`workflows/`](workflows/)) | Designed as a governed workflow: five gates, each evaluated through URGE. Procurement in process |
 | W1 sensing the locale ([`workflows/`](workflows/)) | Designed as a governed workflow: six gates, FHIR R4 `Device` and `Observation`. Procurement in process |

@@ -109,9 +109,11 @@ generate_deontic_valuations() {
     local n_pairs=$((n_worlds * n_atoms))
     local total=$((2 ** n_pairs))
 
-    # Limit combinations
-    if [[ $total -gt 128 ]]; then
-        total=128
+    # Limit combinations, but say so: a VALID verdict after truncation has
+    # only been checked against part of the model space.
+    if [[ $total -gt 256 ]]; then
+        echo "WARNING: $total valuations truncated to 256; verdict is partial" >&2
+        total=256
     fi
 
     for ((i = 0; i < total; i++)); do
@@ -121,211 +123,157 @@ generate_deontic_valuations() {
             for a in "${atom_arr[@]}"; do
                 local val=$(( (i >> bit) & 1 ))
                 valuation="$valuation $w:$a=$val"
-                ((bit++))
+                bit=$((bit + 1))
             done
         done
         echo "$valuation"
     done
 }
 
-# Get value of atom in specific world
-get_value() {
-    local world="$1"
-    local atom="$2"
-    local valuation="$3"
-
-    local pattern="$world:$atom="
-    local match=$(echo "$valuation" | grep -oE "$pattern[01]" | head -1)
-
-    if [[ -n "$match" ]]; then
-        echo "${match##*=}"
-    else
-        echo "0"
-    fi
+# Atoms of a deontic expression: every identifier once the operator letters
+# O( P( F( have been projected away.
+deontic_atoms() {
+    extract_atoms "$(echo "$1" | sed -E 's/\b[OPF]\(/(/g')"
 }
 
-# Evaluate deontic expression at ideal worlds
+# Evaluate a deontic expression over the ideal worlds. Result is left in
+# DEONTIC_VAL (0/1) rather than printed, so the recursion costs no subshells.
+#
+# Precedence, lowest first: ↔  →  ∨  ∧  then the unary ¬ and the deontic
+# operators. Binary connectives are split at paren depth 0 only, so
+# "(O(P) ∧ O(Q)) → O(P)" is read as written.
 eval_deontic() {
     local expr="$1"
     local ideal_worlds="$2"
     local valuation="$3"
+    local left right v1 inner w
 
-    expr=$(echo "$expr" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    local world_arr=($ideal_worlds)
+    strip_outer_parens "$expr"; expr="$STRIPPED"
 
-    # Handle O(P) - true in all ideal worlds
-    if [[ "$expr" =~ ^O\((.+)\)$ ]]; then
-        local inner="${BASH_REMATCH[1]}"
-        for w in "${world_arr[@]}"; do
-            local val=$(eval_prop "$inner" "$w" "$valuation")
-            if [[ "$val" == "0" ]]; then
-                echo "0"
-                return
-            fi
+    if split_top_level "$expr" "↔"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_deontic "$left" "$ideal_worlds" "$valuation"; v1=$DEONTIC_VAL
+        eval_deontic "$right" "$ideal_worlds" "$valuation"
+        [[ "$v1" == "$DEONTIC_VAL" ]] && DEONTIC_VAL=1 || DEONTIC_VAL=0
+        return
+    fi
+    if split_top_level "$expr" "→"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_deontic "$left" "$ideal_worlds" "$valuation"
+        if [[ "$DEONTIC_VAL" == "0" ]]; then DEONTIC_VAL=1; return; fi
+        eval_deontic "$right" "$ideal_worlds" "$valuation"
+        return
+    fi
+    if split_top_level "$expr" "∨"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_deontic "$left" "$ideal_worlds" "$valuation"
+        if [[ "$DEONTIC_VAL" == "1" ]]; then return; fi
+        eval_deontic "$right" "$ideal_worlds" "$valuation"
+        return
+    fi
+    if split_top_level "$expr" "∧"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_deontic "$left" "$ideal_worlds" "$valuation"
+        if [[ "$DEONTIC_VAL" == "0" ]]; then return; fi
+        eval_deontic "$right" "$ideal_worlds" "$valuation"
+        return
+    fi
+
+    # O(x): x true in all ideal worlds
+    if [[ "$expr" =~ ^O\((.*)\)$ ]]; then
+        inner="${BASH_REMATCH[1]}"
+        for w in $ideal_worlds; do
+            eval_prop "$inner" "$w" "$valuation"
+            if [[ "$PROP_VAL" == "0" ]]; then DEONTIC_VAL=0; return; fi
         done
-        echo "1"
+        DEONTIC_VAL=1
         return
     fi
-
-    # Handle P(P) - true in some ideal world
-    if [[ "$expr" =~ ^P\((.+)\)$ ]]; then
-        local inner="${BASH_REMATCH[1]}"
-        for w in "${world_arr[@]}"; do
-            local val=$(eval_prop "$inner" "$w" "$valuation")
-            if [[ "$val" == "1" ]]; then
-                echo "1"
-                return
-            fi
+    # P(x): x true in some ideal world
+    if [[ "$expr" =~ ^P\((.*)\)$ ]]; then
+        inner="${BASH_REMATCH[1]}"
+        for w in $ideal_worlds; do
+            eval_prop "$inner" "$w" "$valuation"
+            if [[ "$PROP_VAL" == "1" ]]; then DEONTIC_VAL=1; return; fi
         done
-        echo "0"
+        DEONTIC_VAL=0
         return
     fi
-
-    # Handle F(P) = O(¬P) - P false in all ideal worlds
-    if [[ "$expr" =~ ^F\((.+)\)$ ]]; then
-        local inner="${BASH_REMATCH[1]}"
-        for w in "${world_arr[@]}"; do
-            local val=$(eval_prop "$inner" "$w" "$valuation")
-            if [[ "$val" == "1" ]]; then
-                echo "0"  # Found a world where P is true, so not forbidden
-                return
-            fi
+    # F(x) = O(¬x): x false in all ideal worlds
+    if [[ "$expr" =~ ^F\((.*)\)$ ]]; then
+        inner="${BASH_REMATCH[1]}"
+        for w in $ideal_worlds; do
+            eval_prop "$inner" "$w" "$valuation"
+            if [[ "$PROP_VAL" == "1" ]]; then DEONTIC_VAL=0; return; fi
         done
-        echo "1"  # P is false in all ideal worlds = forbidden
+        DEONTIC_VAL=1
+        return
+    fi
+    if [[ "$expr" == ¬* ]]; then
+        inner="${expr#¬}"
+        eval_deontic "$inner" "$ideal_worlds" "$valuation"
+        [[ "$DEONTIC_VAL" == "1" ]] && DEONTIC_VAL=0 || DEONTIC_VAL=1
         return
     fi
 
-    # Handle negation ¬
-    if [[ "$expr" =~ ^¬(.+)$ ]]; then
-        local inner="${BASH_REMATCH[1]}"
-        local val=$(eval_deontic "$inner" "$ideal_worlds" "$valuation")
-        if [[ "$val" == "1" ]]; then
-            echo "0"
-        else
-            echo "1"
-        fi
-        return
-    fi
-
-    # Handle conjunction ∧
-    if [[ "$expr" =~ (.+)∧(.+) ]]; then
-        local left="${BASH_REMATCH[1]}"
-        local right="${BASH_REMATCH[2]}"
-        local v1=$(eval_deontic "$left" "$ideal_worlds" "$valuation")
-        local v2=$(eval_deontic "$right" "$ideal_worlds" "$valuation")
-        if [[ "$v1" == "1" && "$v2" == "1" ]]; then
-            echo "1"
-        else
-            echo "0"
-        fi
-        return
-    fi
-
-    # Handle disjunction ∨
-    if [[ "$expr" =~ (.+)∨(.+) ]]; then
-        local left="${BASH_REMATCH[1]}"
-        local right="${BASH_REMATCH[2]}"
-        local v1=$(eval_deontic "$left" "$ideal_worlds" "$valuation")
-        local v2=$(eval_deontic "$right" "$ideal_worlds" "$valuation")
-        if [[ "$v1" == "1" || "$v2" == "1" ]]; then
-            echo "1"
-        else
-            echo "0"
-        fi
-        return
-    fi
-
-    # Handle implication →
-    if [[ "$expr" =~ (.+)→(.+) ]]; then
-        local left="${BASH_REMATCH[1]}"
-        local right="${BASH_REMATCH[2]}"
-        local v1=$(eval_deontic "$left" "$ideal_worlds" "$valuation")
-        local v2=$(eval_deontic "$right" "$ideal_worlds" "$valuation")
-        if [[ "$v1" == "0" || "$v2" == "1" ]]; then
-            echo "1"
-        else
-            echo "0"
-        fi
-        return
-    fi
-
-    # Handle parentheses
-    if [[ "$expr" =~ ^\((.+)\)$ ]]; then
-        eval_deontic "${BASH_REMATCH[1]}" "$ideal_worlds" "$valuation"
-        return
-    fi
-
-    # Atomic proposition - not directly evaluable at deontic level
-    # Default to checking if it's satisfied
-    echo "1"
+    # A bare proposition at the deontic level describes the actual world,
+    # about which SDL validity says nothing: treat as satisfied.
+    DEONTIC_VAL=1
 }
 
-# Evaluate propositional expression at specific world
+# Evaluate a propositional expression at a specific world. Result in PROP_VAL.
 eval_prop() {
     local expr="$1"
     local world="$2"
     local valuation="$3"
+    local left right inner v1
 
-    expr=$(echo "$expr" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    strip_outer_parens "$expr"; expr="$STRIPPED"
 
-    # Atomic proposition
-    if [[ "$expr" =~ ^[A-Z]$ ]]; then
-        get_value "$world" "$expr" "$valuation"
+    if split_top_level "$expr" "↔"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_prop "$left" "$world" "$valuation"; v1=$PROP_VAL
+        eval_prop "$right" "$world" "$valuation"
+        [[ "$v1" == "$PROP_VAL" ]] && PROP_VAL=1 || PROP_VAL=0
+        return
+    fi
+    if split_top_level "$expr" "→"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_prop "$left" "$world" "$valuation"
+        if [[ "$PROP_VAL" == "0" ]]; then PROP_VAL=1; return; fi
+        eval_prop "$right" "$world" "$valuation"
+        return
+    fi
+    if split_top_level "$expr" "∨"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_prop "$left" "$world" "$valuation"
+        if [[ "$PROP_VAL" == "1" ]]; then return; fi
+        eval_prop "$right" "$world" "$valuation"
+        return
+    fi
+    if split_top_level "$expr" "∧"; then
+        left="$SPLIT_LEFT"; right="$SPLIT_RIGHT"
+        eval_prop "$left" "$world" "$valuation"
+        if [[ "$PROP_VAL" == "0" ]]; then return; fi
+        eval_prop "$right" "$world" "$valuation"
+        return
+    fi
+    if [[ "$expr" == ¬* ]]; then
+        inner="${expr#¬}"
+        eval_prop "$inner" "$world" "$valuation"
+        [[ "$PROP_VAL" == "1" ]] && PROP_VAL=0 || PROP_VAL=1
         return
     fi
 
-    # Constants
-    if [[ "$expr" == "⊤" ]]; then
-        echo "1"
-        return
-    fi
-    if [[ "$expr" == "⊥" ]]; then
-        echo "0"
+    if [[ "$expr" == "⊤" ]]; then PROP_VAL=1; return; fi
+    if [[ "$expr" == "⊥" ]]; then PROP_VAL=0; return; fi
+    if [[ "$expr" =~ ^[A-Za-z_][A-Za-z0-9_=]*$ ]]; then
+        lookup_valuation "$world" "$expr" "$valuation"; PROP_VAL=$ATOM_VAL
         return
     fi
 
-    # Negation
-    if [[ "$expr" =~ ^¬(.+)$ ]]; then
-        local inner="${BASH_REMATCH[1]}"
-        local val=$(eval_prop "$inner" "$world" "$valuation")
-        if [[ "$val" == "1" ]]; then
-            echo "0"
-        else
-            echo "1"
-        fi
-        return
-    fi
-
-    # Parentheses
-    if [[ "$expr" =~ ^\((.+)\)$ ]]; then
-        eval_prop "${BASH_REMATCH[1]}" "$world" "$valuation"
-        return
-    fi
-
-    # Binary operators
-    if [[ "$expr" =~ (.+)∧(.+) ]]; then
-        local v1=$(eval_prop "${BASH_REMATCH[1]}" "$world" "$valuation")
-        local v2=$(eval_prop "${BASH_REMATCH[2]}" "$world" "$valuation")
-        [[ "$v1" == "1" && "$v2" == "1" ]] && echo "1" || echo "0"
-        return
-    fi
-
-    if [[ "$expr" =~ (.+)∨(.+) ]]; then
-        local v1=$(eval_prop "${BASH_REMATCH[1]}" "$world" "$valuation")
-        local v2=$(eval_prop "${BASH_REMATCH[2]}" "$world" "$valuation")
-        [[ "$v1" == "1" || "$v2" == "1" ]] && echo "1" || echo "0"
-        return
-    fi
-
-    if [[ "$expr" =~ (.+)→(.+) ]]; then
-        local v1=$(eval_prop "${BASH_REMATCH[1]}" "$world" "$valuation")
-        local v2=$(eval_prop "${BASH_REMATCH[2]}" "$world" "$valuation")
-        [[ "$v1" == "0" || "$v2" == "1" ]] && echo "1" || echo "0"
-        return
-    fi
-
-    # Default
-    echo "1"
+    # Unparseable fragment: false.
+    PROP_VAL=0
 }
 
 # ============================================================================
@@ -338,7 +286,7 @@ check_deontic_validity() {
     local n_ideal="${2:-2}"
 
     # Extract atoms
-    local atoms=$(echo "$expr" | grep -oE '\b[A-Z]\b' | sort -u | tr '\n' ' ')
+    local atoms=$(deontic_atoms "$expr")
 
     # Generate frame
     local frame=$(generate_deontic_frame "$n_ideal")
@@ -349,8 +297,8 @@ check_deontic_validity() {
 
     if [[ -z "$valuations" ]]; then
         # No atoms - evaluate directly
-        local val=$(eval_deontic "$expr" "$ideal_worlds" "")
-        if [[ "$val" == "0" ]]; then
+        eval_deontic "$expr" "$ideal_worlds" ""
+        if [[ "$DEONTIC_VAL" == "0" ]]; then
             echo "INVALID"
             echo "counterexample: (no atoms)"
             return 1
@@ -358,10 +306,10 @@ check_deontic_validity() {
     else
         while IFS= read -r valuation; do
             [[ -z "$valuation" ]] && continue
-            local val=$(eval_deontic "$expr" "$ideal_worlds" "$valuation")
-            if [[ "$val" == "0" ]]; then
+            eval_deontic "$expr" "$ideal_worlds" "$valuation"
+            if [[ "$DEONTIC_VAL" == "0" ]]; then
                 echo "INVALID"
-                echo "counterexample: $valuation"
+                echo "counterexample:${valuation}"
                 return 1
             fi
         done <<< "$valuations"

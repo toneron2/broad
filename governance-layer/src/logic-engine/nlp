@@ -17,6 +17,7 @@
 
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "${SCRIPT_DIR}/lib/common.sh"   # pins LC_ALL to a UTF-8 locale
 DICT_DIR="${SCRIPT_DIR}/dict/nlp"
 
 # ============================================================================

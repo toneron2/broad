@@ -30,7 +30,7 @@ requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
 
 [tool.poetry.scripts]
-mcp-healthcare-workflows = "src.main:main"
+mcp-healthcare-workflows = "src.main:run"
 
 [tool.black]
 line-length = 100

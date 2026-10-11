@@ -77,20 +77,20 @@ echo -e "${BOLD}${YELLOW}  SECTION 2: Modal Logic - Necessity & Possibility${NC}
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
-echo -e "${CYAN}Testing: □P → P (T-Axiom)${NC}"
-echo -e "${CYAN}What is NECESSARY (□) must be TRUE.${NC}"
+echo -e "${CYAN}Testing: □P → P (T-Axiom, system T)${NC}"
+echo -e "${CYAN}What is NECESSARY (□) must be TRUE - on reflexive frames.${NC}"
 echo ""
 echo -n "  Result: "
-./logic "□P → P"
+./logic -s T "□P → P"
 echo ""
 
 sleep 1
 
-echo -e "${CYAN}Testing: □P → □□P (S4-Axiom)${NC}"
-echo -e "${CYAN}If necessary, then necessarily necessary.${NC}"
+echo -e "${CYAN}Testing: □P → □□P (4-Axiom, system S4)${NC}"
+echo -e "${CYAN}If necessary, then necessarily necessary - on transitive frames.${NC}"
 echo ""
 echo -n "  Result: "
-./logic "□P → □□P"
+./logic -s S4 "□P → □□P"
 echo ""
 
 sleep 1
@@ -112,7 +112,8 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 echo -e "${CYAN}Testing: O(auth) → P(access)${NC}"
-echo -e "${CYAN}If authentication is OBLIGATORY, then access is PERMITTED.${NC}"
+echo -e "${CYAN}A policy, not a theorem: obliging auth says nothing about access,${NC}"
+echo -e "${CYAN}and the engine shows the counter-model rather than waving it through.${NC}"
 echo ""
 echo -n "  Result: "
 ./logic "O(auth) → P(access)"
@@ -146,8 +147,8 @@ echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━�
 echo ""
 
 echo -e "${CYAN}Testing: □O(auth) → P(access)${NC}"
-echo -e "${CYAN}If auth is NECESSARILY OBLIGATORY, access is PERMITTED.${NC}"
-echo -e "${CYAN}(Modal □ + Deontic O/P)${NC}"
+echo -e "${CYAN}Modal □ + Deontic O/P: a policy evaluated in both paradigms;${NC}"
+echo -e "${CYAN}contingent, so each engine reports its counter-model.${NC}"
 echo ""
 echo -n "  Result: "
 ./logic "□O(auth) → P(access)"

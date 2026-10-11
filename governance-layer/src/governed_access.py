@@ -43,8 +43,8 @@ from typing import Optional, Callable, Any
 from functools import wraps
 
 from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer
-from access_agent import AccessAgent, AccessDecision
-from heartbeat import HeartbeatManager, HeartbeatSession, SessionState, DeviceInfo
+from access_agent import AccessAgent
+from heartbeat import HeartbeatManager, DeviceInfo, accept_any_token
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("governance")
@@ -60,6 +60,7 @@ class GovernanceDecision:
     agent_type: AgentType
     reasoning_trace: list[str] = field(default_factory=list)
     policy_expression: str = ""
+    temporal_violations: list[str] = field(default_factory=list)
     latency_ms: float = 0.0
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
 
@@ -72,6 +73,7 @@ class GovernanceDecision:
             "agent_type": self.agent_type.value,
             "reasoning_trace": self.reasoning_trace,
             "policy_expression": self.policy_expression,
+            "temporal_violations": self.temporal_violations,
             "latency_ms": self.latency_ms,
             "timestamp": self.timestamp
         }
@@ -120,10 +122,16 @@ class GovernanceGateway:
         Complete access control check.
 
         Sequence:
-            1. Check session validity (heartbeat)
+            1. Check session validity (heartbeat) and the session's temporal
+               bounds (idle timeout, maximum duration)
             2. Check guardrails (formal constraints)
             3. Check Logic Engine (multi-paradigm reasoning)
-            4. Return comprehensive decision
+            4. Return comprehensive decision; the decision's own latency is
+               checked against □(security_decision ≤ 50ms) and reported in
+               temporal_violations (not enforced: the decision is made).
+
+        Callers may pass measured values for other □ bounds in
+        context["metrics"] = {"route_retry": 2, ...}.
 
         Args:
             session_id: Heartbeat session ID (None for service-to-service)
@@ -136,7 +144,9 @@ class GovernanceGateway:
             GovernanceDecision with full reasoning trace
         """
         start_time = time.time()
-        context = context or {}
+        # Copy: session context is merged in below and must not leak back
+        # into the caller's dict.
+        context = dict(context or {})
         reasoning_trace = []
 
         # Initialize decision
@@ -148,8 +158,11 @@ class GovernanceGateway:
             agent_type=self.enforcer.get_agent_type(agent_name)
         )
 
-        # Step 1: Session Check (if session_id provided)
+        # Step 1: Session Check (if session_id provided). The first
+        # session-bound check starts the heartbeat monitor, so sessions
+        # degrade and expire without the caller having to remember to.
         if session_id:
+            self.heartbeat_manager.start_monitor()
             session_context = await self.heartbeat_manager.get_session_context(session_id)
             if session_context:
                 decision.session_valid = session_context.get("session_valid", False)
@@ -167,6 +180,24 @@ class GovernanceGateway:
             decision.reasoning_trace = reasoning_trace
             self._log_decision(decision)
             return decision
+
+        # Step 1b: Temporal bounds on the session and any caller-supplied metrics
+        metrics = dict(context.get("metrics") or {})
+        if context.get("idle_seconds") is not None:
+            metrics.setdefault("idle_session_timeout", context["idle_seconds"])
+        if context.get("session_age_seconds") is not None:
+            metrics.setdefault("maximum_session_duration", context["session_age_seconds"])
+        if metrics:
+            bounds_hold, violations = self.enforcer.check_temporal_bounds(agent_name, metrics)
+            if not bounds_hold:
+                decision.temporal_violations = violations
+                reasoning_trace.append("Temporal bounds: VIOLATED")
+                reasoning_trace.extend(f"  {v}" for v in violations)
+                decision.latency_ms = (time.time() - start_time) * 1000
+                decision.reasoning_trace = reasoning_trace
+                self._log_decision(decision)
+                return decision
+            reasoning_trace.append(f"Temporal bounds: OK ({', '.join(sorted(metrics))})")
 
         # Step 2: Guardrails Check
         guardrails_allowed, guardrails_reason = self.enforcer.check_action(
@@ -204,6 +235,17 @@ class GovernanceGateway:
         reasoning_trace.append(f"Final decision: {'ALLOW' if decision.allowed else 'DENY'}")
 
         decision.latency_ms = (time.time() - start_time) * 1000
+
+        # □(security_decision ≤ 50ms): measured after the fact, so reported
+        # rather than enforced. The shell engine cannot meet it (README).
+        _, latency_violations = self.enforcer.check_temporal_bounds(
+            agent_name, {"security_decision": decision.latency_ms / 1000.0}
+        )
+        if latency_violations:
+            decision.temporal_violations.extend(latency_violations)
+            reasoning_trace.append(f"Temporal bound exceeded (reported): {latency_violations[0]}")
+            logger.warning(f"Decision latency bound exceeded: {latency_violations[0]}")
+
         decision.reasoning_trace = reasoning_trace
 
         self._log_decision(decision)
@@ -214,6 +256,19 @@ class GovernanceGateway:
         )
 
         return decision
+
+    def start_session_monitoring(self) -> asyncio.Task:
+        """
+        Start the heartbeat monitor so idle sessions degrade and terminate.
+
+        check_access starts it on the first session-bound call; call this to
+        start it earlier. Must run inside an event loop.
+        """
+        return self.heartbeat_manager.start_monitor()
+
+    def close(self) -> None:
+        """Stop the heartbeat monitor."""
+        self.heartbeat_manager.stop_monitor()
 
     def _log_decision(self, decision: GovernanceDecision):
         """Log decision for audit."""
@@ -294,9 +349,15 @@ def governed_mcp_tool(
 
     Usage:
         @governed_mcp_tool("healthcare", "read_patient")
-        async def read_patient(patient_id: str, context: dict = None):
+        async def read_patient(patient_id: str):
             # Only executes if access is granted
             ...
+
+        await read_patient("p-1", context={"authenticated": True}, session_id=sid)
+
+    The wrapper consumes the keyword arguments ``context`` and ``session_id``;
+    they are not passed on to the tool. The governed resource is named
+    "<domain>_<tool_name>".
 
     Args:
         domain: MCP domain (e.g., "healthcare", "sales")
@@ -311,7 +372,7 @@ def governed_mcp_tool(
             session_id = kwargs.pop("session_id", None)
 
             # Build resource name
-            resource = f"{domain}.{tool_name}"
+            resource = f"{domain}_{tool_name}"  # identifier: no "." (see access_agent.IDENTIFIER)
             action = "execute"
 
             # Check governance
@@ -345,14 +406,16 @@ def governed_sync_tool(
     """
     Decorator for synchronous tools that require governance.
 
-    Same as governed_mcp_tool but for sync functions.
+    Same as governed_mcp_tool but for sync functions. The heartbeat session
+    check is asynchronous and is NOT performed here: only guardrails and the
+    Logic Engine run. Use governed_mcp_tool for session-bound calls.
     """
     def decorator(func: Callable) -> Callable:
         @wraps(func)
         def wrapper(*args, **kwargs) -> Any:
             context = kwargs.pop("context", {})
 
-            resource = f"{domain}.{tool_name}"
+            resource = f"{domain}_{tool_name}"  # identifier: no "." (see access_agent.IDENTIFIER)
             action = "execute"
 
             # Use sync check
@@ -395,7 +458,9 @@ if __name__ == "__main__":
         print("Governance Gateway - Complete Demo")
         print("=" * 60)
 
-        gateway = GovernanceGateway()
+        gateway = GovernanceGateway(
+            heartbeat_manager=HeartbeatManager(token_validator=accept_any_token)
+        )
 
         # Register a device
         device = DeviceInfo(
@@ -497,5 +562,6 @@ if __name__ == "__main__":
             print(f"    {entry['timestamp']}: allowed={entry['allowed']}, latency={entry['latency_ms']:.2f}ms")
 
         print("\n" + "=" * 60)
+        gateway.close()
 
     asyncio.run(demo())

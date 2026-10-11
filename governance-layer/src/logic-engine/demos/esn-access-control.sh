@@ -67,8 +67,8 @@ scenario_bio_auth() {
     demo_result "$result"
 
     demo_step "Checking user request: authenticated=true"
-    result=$("${ENGINE_DIR}/deontic.sh" "O(auth) → P(access)" 2>&1) || true
-    demo_result "Policy VALID - Access GRANTED"
+    result=$("${ENGINE_DIR}/deontic.sh" -t "O(auth) → P(access)" 2>&1) || true
+    demo_result "Policy CONSISTENT, user authenticated - Access GRANTED"
 
     demo_step "Checking user request: authenticated=false"
     demo_deny "Policy requires authentication - Access DENIED"
@@ -235,10 +235,10 @@ scenario_realworld() {
     echo -e "${GREEN}FINAL DECISION: ACCESS GRANTED${NC}"
     echo ""
     echo "Reasoning Trace (for audit):"
-    echo "  1. bio_auth=true, O(bio_auth) → P(identity_verified) [VALID]"
-    echo "  2. role=patient, P(health_records|role=patient) [VALID]"
-    echo "  3. consent=true, O(consent) → P(data_access) [VALID]"
-    echo "  4. Combined: (1) ∧ (2) ∧ (3) → P(access) [VALID]"
+    echo "  1. bio_auth=true, O(bio_auth) → P(identity_verified) [CONSISTENT]"
+    echo "  2. role=patient, P(health_records|role=patient) [CONSISTENT]"
+    echo "  3. consent=true, O(consent) → P(data_access) [CONSISTENT]"
+    echo "  4. Combined: (1) ∧ (2) ∧ (3) → P(access) [CONSISTENT]"
 }
 
 # ============================================================================

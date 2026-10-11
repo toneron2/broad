@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_DIR="${SCRIPT_DIR}/../engines"
 ROOT_DIR="${SCRIPT_DIR}/.."
 TEST_DIR="${SCRIPT_DIR}/generated"
+source "${ROOT_DIR}/lib/common.sh"   # pins LC_ALL to a UTF-8 locale
 
 # Colors for output
 RED='\033[0;31m'
@@ -16,10 +17,18 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Counters
+# Counters. Incremented with PASS=$((PASS+1)) rather than ((PASS++)): the
+# latter returns status 1 when the counter is 0 and would trip set -e.
 PASS=0
 FAIL=0
 SKIP=0
+
+# Does the engine output contain the expected verdict as a whole word?
+# A plain regex match would let "VALID" match "INVALID".
+verdict_matches() {
+    local result="$1" expected="$2"
+    [[ "$result" =~ (^|[^A-Za-z_-])${expected}([^A-Za-z_-]|$) ]]
+}
 
 # ============================================================================
 # TEST RUNNER FUNCTIONS
@@ -30,10 +39,11 @@ run_test() {
     local expr="$2"
     local expected="$3"
     local extra_args="${4:-}"
+    local worlds="${5:-}"
 
     # Skip CHECK tests (these are for manual verification)
     if [[ "$expected" == "CHECK" ]]; then
-        ((SKIP++))
+        SKIP=$((SKIP+1))
         return 0
     fi
 
@@ -44,7 +54,7 @@ run_test() {
             ;;
         modal)
             local system="${extra_args:-K}"
-            result=$("${ENGINE_DIR}/modal.sh" -s "$system" "$expr" 2>&1) || true
+            result=$("${ENGINE_DIR}/modal.sh" -s "$system" -w "${worlds:-2}" "$expr" 2>&1) || true
             ;;
         deontic)
             result=$("${ENGINE_DIR}/deontic.sh" "$expr" 2>&1) || true
@@ -60,16 +70,16 @@ run_test() {
             ;;
     esac
 
-    # Check if result matches expected pattern
-    if [[ "$result" =~ $expected ]]; then
-        echo -e "${GREEN}PASS${NC}: $expr -> $expected"
-        ((PASS++))
+    # Check if result contains the expected verdict
+    if verdict_matches "$result" "$expected"; then
+        echo -e "${GREEN}PASS${NC}: $expr -> $expected${extra_args:+ [$extra_args${worlds:+, $worlds worlds}]}"
+        PASS=$((PASS+1))
         return 0
     else
-        echo -e "${RED}FAIL${NC}: $expr"
+        echo -e "${RED}FAIL${NC}: $expr${extra_args:+ [$extra_args${worlds:+, $worlds worlds}]}"
         echo "  Expected: $expected"
-        echo "  Got: $(echo "$result" | head -1)"
-        ((FAIL++))
+        echo "  Got: $(echo "$result" | grep -vE '^(WARNING|[A-Z0-9-]+-AXIOM)' | head -1)"
+        FAIL=$((FAIL+1))
         return 1
     fi
 }
@@ -108,11 +118,12 @@ run_modal_tests() {
     echo "=== Running Modal Logic Tests ==="
     echo ""
 
-    while IFS='|' read -r expr system expected; do
+    # Format: expression|system|expected[|worlds]
+    while IFS='|' read -r expr system expected worlds; do
         [[ -z "$expr" ]] && continue
         [[ "$expr" =~ ^# ]] && { echo "$expr"; continue; }
 
-        run_test "modal" "$expr" "$expected" "$system" || true
+        run_test "modal" "$expr" "$expected" "$system" "$worlds" || true
     done < "$test_file"
 }
 
@@ -134,12 +145,12 @@ run_deontic_tests() {
         # For consistency tests, use -t flag
         if [[ "$expected" == "INCONSISTENT" ]]; then
             local result=$("${ENGINE_DIR}/deontic.sh" -t "$expr" 2>&1) || true
-            if [[ "$result" =~ INCONSISTENT ]]; then
+            if verdict_matches "$result" "INCONSISTENT"; then
                 echo -e "${GREEN}PASS${NC}: $expr -> $expected"
-                ((PASS++))
+                PASS=$((PASS+1))
             else
                 echo -e "${RED}FAIL${NC}: $expr -> expected INCONSISTENT, got: $(echo "$result" | head -1)"
-                ((FAIL++))
+                FAIL=$((FAIL+1))
             fi
         else
             run_test "deontic" "$expr" "$expected" || true
@@ -188,12 +199,42 @@ run_nlp_tests() {
 
         if [[ "$result" == "$expected_formal" ]]; then
             echo -e "${GREEN}PASS${NC}: '$nl_expr' -> '$expected_formal'"
-            ((PASS++))
+            PASS=$((PASS+1))
         else
             echo -e "${RED}FAIL${NC}: '$nl_expr'"
             echo "  Expected: '$expected_formal'"
             echo "  Got: '$result'"
-            ((FAIL++))
+            FAIL=$((FAIL+1))
+        fi
+    done < "$test_file"
+}
+
+run_esn_tests() {
+    local test_file="${TEST_DIR}/esn-tests.txt"
+    if [[ ! -f "$test_file" ]]; then
+        echo "ESN tests not found. Run generate-tests.sh first."
+        return 1
+    fi
+
+    echo ""
+    echo "=== Running ESN Access Control Tests ==="
+    echo ""
+
+    # Format: policy|request|expected_decision   (request may be empty)
+    while IFS='|' read -r policy request expected; do
+        [[ -z "$policy" ]] && continue
+        [[ "$policy" =~ ^# ]] && { echo "$policy"; continue; }
+
+        local result=$("${ENGINE_DIR}/meta.sh" -a "$policy" "$request" 2>&1) || true
+        local decision=$(echo "$result" | grep -E '^DECISION:' | tail -1)
+        if verdict_matches "$decision" "$expected"; then
+            echo -e "${GREEN}PASS${NC}: $policy  |  ${request:-(none)}  -> $expected"
+            PASS=$((PASS+1))
+        else
+            echo -e "${RED}FAIL${NC}: $policy  |  ${request:-(none)}"
+            echo "  Expected: $expected"
+            echo "  Got: ${decision:-$(echo "$result" | head -1)}"
+            FAIL=$((FAIL+1))
         fi
     done < "$test_file"
 }
@@ -216,7 +257,8 @@ run_smoke_tests() {
     # Modal basics
     echo "--- Modal ---"
     run_test "modal" "□P → P" "VALID" "T" || true
-    run_test "modal" "□P → ◇P" "VALID" "K" || true
+    run_test "modal" "□P → P" "INVALID" "K" || true
+    run_test "modal" "□P → ◇P" "VALID" "D" || true
 
     # Deontic basics
     echo "--- Deontic ---"
@@ -227,10 +269,10 @@ run_smoke_tests() {
     local nlp_result=$("${ROOT_DIR}/nlp" "if P then Q" 2>&1)
     if [[ "$nlp_result" == "P → Q" ]]; then
         echo -e "${GREEN}PASS${NC}: NLP 'if P then Q' -> 'P → Q'"
-        ((PASS++))
+        PASS=$((PASS+1))
     else
         echo -e "${RED}FAIL${NC}: NLP 'if P then Q' -> expected 'P → Q', got '$nlp_result'"
-        ((FAIL++))
+        FAIL=$((FAIL+1))
     fi
 }
 
@@ -252,6 +294,7 @@ TEST_SUITES:
     deontic     Deontic logic tests
     meta        Meta-engine tests
     nlp         NLP translation tests
+    esn         ESN access control decisions (meta.sh -a)
 
 OPTIONS:
     -g, --generate    Generate tests before running
@@ -311,6 +354,7 @@ main() {
                 run_deontic_tests
                 run_meta_tests
                 run_nlp_tests
+                run_esn_tests
             fi
             ;;
         smoke)
@@ -330,6 +374,9 @@ main() {
             ;;
         nlp)
             run_nlp_tests
+            ;;
+        esn)
+            run_esn_tests
             ;;
         *)
             echo "Unknown test suite: $suite"

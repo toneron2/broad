@@ -58,6 +58,25 @@ TRANSLATION_MATRIX["epistemic:modal:B"]="◇"    # Belief → Possibility (weake
 # PARADIGM DECOMPOSITION
 # ============================================================================
 
+# Project a multi-paradigm expression onto its propositional skeleton for
+# the boolean engine: drop □ ◇ and replace the deontic operators by their
+# operand, keeping parentheses balanced. "□O(P) → P(Q)" becomes "(P) → (Q)".
+boolean_projection() {
+    echo "$1" | sed -E 's/[□◇]//g; s/\b[OPF]\(/(/g'
+}
+
+# Projection for the modal engine: keep □ ◇, read each deontic claim as its
+# propositional content. "□O(P) → P(Q)" becomes "□(P) → (Q)".
+modal_projection() {
+    echo "$1" | sed -E 's/\b[OPF]\(/(/g'
+}
+
+# Projection for the deontic engine: read □X / ◇X as X (the Figure 25
+# idealisation, □ ↔ O). "□O(P) → O(P)" becomes "O(P) → O(P)".
+deontic_projection() {
+    echo "$1" | sed -E 's/[□◇]//g'
+}
+
 # Identify which paradigms are present in an expression
 detect_paradigms() {
     local expr="$1"
@@ -114,7 +133,7 @@ decompose_expression() {
         case "$p" in
             boolean)
                 # Base propositional structure
-                local bool_expr=$(echo "$expr" | sed 's/□//g;s/◇//g;s/O(//g;s/P(//g;s/F(//g;s/)//g')
+                local bool_expr=$(boolean_projection "$expr")
                 echo "BOOLEAN:$bool_expr"
                 ;;
             modal)
@@ -203,7 +222,7 @@ evaluate_multiparadigm() {
         case "$p" in
             boolean)
                 if [[ -x "${ENGINE_DIR}/boolean.sh" ]]; then
-                    local bool_result=$("${ENGINE_DIR}/boolean.sh" "$expr" 2>&1) || true
+                    local bool_result=$("${ENGINE_DIR}/boolean.sh" "$(boolean_projection "$expr")" 2>&1) || true
                     results="$results\nBOOLEAN: $bool_result"
                     if [[ -z "$primary_result" ]]; then
                         primary_result="$bool_result"
@@ -212,14 +231,14 @@ evaluate_multiparadigm() {
                 ;;
             modal)
                 if [[ -x "${ENGINE_DIR}/modal.sh" ]]; then
-                    local modal_result=$("${ENGINE_DIR}/modal.sh" "$expr" 2>&1) || true
+                    local modal_result=$("${ENGINE_DIR}/modal.sh" "$(modal_projection "$expr")" 2>&1) || true
                     results="$results\nMODAL: $modal_result"
                     primary_result="$modal_result"
                 fi
                 ;;
             deontic)
                 if [[ -x "${ENGINE_DIR}/deontic.sh" ]]; then
-                    local deontic_result=$("${ENGINE_DIR}/deontic.sh" "$expr" 2>&1) || true
+                    local deontic_result=$("${ENGINE_DIR}/deontic.sh" "$(deontic_projection "$expr")" 2>&1) || true
                     results="$results\nDEONTIC: $deontic_result"
                     primary_result="$deontic_result"
                 fi
@@ -283,49 +302,158 @@ compose_reasoning() {
 # ESN ACCESS CONTROL COMPOSITION
 # ============================================================================
 
-# Specialized composition for ESN access control scenarios
-# Combines: deontic (obligations) + modal (necessity) + temporal (timing)
+# Specialized composition for ESN access control scenarios.
+#
+#   esn_access_decision POLICY REQUEST
+#
+# POLICY is a formal policy such as "(O(auth) ∧ O(role=nurse)) → P(read)".
+# REQUEST is what is true of this request: facts joined by ∧, each optionally
+# negated with ¬ ("auth ∧ role=nurse ∧ ¬verify"). A fact not listed is false.
+#
+# Decision procedure:
+#   1. CONFLICT  if the policy is deontically inconsistent (O(x) ∧ F(x)) or
+#                has a cross-paradigm conflict (□¬x ∧ O(x)).
+#   2. DENY      if the request asserts a fact the policy forbids (F(x)).
+#   3. The policy's antecedent (everything before the main →, or ⊤ if there
+#      is none) is evaluated under the request's facts: each O(x), □x, G(x)
+#      is read as "x holds", the result is a propositional formula with ⊤/⊥
+#      substituted, decided by the boolean engine.
+#      DENY      if the antecedent is false (a precondition is not met) or
+#                cannot be evaluated.
+#   4. ALLOW     if the consequent grants a permission P(x);
+#      DENY      otherwise (deny by default: no permission was granted).
+# The verdict is the last line, "DECISION: ALLOW|DENY|CONFLICT (reason)".
+
+# Read ∧-separated facts into ESN_FACTS (true) and ESN_NEGATED (asserted false).
+parse_request() {
+    local request="$1" part
+    ESN_FACTS=(); ESN_NEGATED=()
+    [[ -z "${request// /}" ]] && return 0
+    while IFS= read -r part; do
+        trim_ws "$part"; part="$TRIMMED"
+        [[ -z "$part" ]] && continue
+        if [[ "$part" == ¬* ]]; then
+            trim_ws "${part#¬}"; ESN_NEGATED+=("$TRIMMED")
+        else
+            ESN_FACTS+=("$part")
+        fi
+    done < <(echo "$request" | sed 's/∧/\n/g')
+}
+
+fact_holds() {
+    local f
+    for f in "${ESN_FACTS[@]}"; do [[ "$f" == "$1" ]] && return 0; done
+    return 1
+}
+
 esn_access_decision() {
-    local request="$1"
-    local policy="$2"
+    local policy="$1"
+    local request="${2:-}"
 
     echo "=== ESN ACCESS CONTROL DECISION ==="
-    echo "Request: $request"
-    echo "Policy: $policy"
+    echo "Policy:  $policy"
+    echo "Request: ${request:-(no facts)}"
     echo ""
 
-    # Parse policy into constraints
     local paradigms=$(detect_paradigms "$policy")
     echo "Policy Paradigms: $paradigms"
 
-    # Check for deontic consistency
+    # Step 1: the policy itself must be coherent
+    echo ""
+    echo "--- Policy Consistency ---"
     if [[ "$paradigms" =~ deontic ]]; then
-        echo ""
-        echo "--- Deontic Analysis ---"
-        local deontic_check=$("${ENGINE_DIR}/deontic.sh" -t "$policy" 2>&1) || true
+        local deontic_check=$("${ENGINE_DIR}/deontic.sh" -t "$(deontic_projection "$policy")" 2>&1) || true
         echo "$deontic_check"
         if [[ "$deontic_check" =~ INCONSISTENT ]]; then
-            echo "DECISION: DENY (inconsistent policy)"
-            return 1
+            echo ""
+            echo "DECISION: CONFLICT (policy is deontically inconsistent)"
+            return 2
         fi
     fi
-
-    # Evaluate policy
-    echo ""
-    echo "--- Policy Evaluation ---"
-    local eval_result=$(evaluate_multiparadigm "$policy" "$paradigms")
-    echo "$eval_result"
-
-    # Extract decision
-    if echo "$eval_result" | grep -q "VALID"; then
+    local cross_check=$(check_cross_system_conflicts "$policy" "$paradigms") || true
+    echo "$cross_check"
+    # Whole-word: the no-conflict answer is the single token NO_CONFLICTS
+    if [[ "$cross_check" =~ (^|[[:space:]])CONFLICT: ]]; then
         echo ""
-        echo "DECISION: ALLOW (policy satisfied)"
-        return 0
-    else
-        echo ""
-        echo "DECISION: DENY (policy not satisfied)"
-        return 1
+        echo "DECISION: CONFLICT (cross-paradigm conflict in policy)"
+        return 2
     fi
+
+    # Step 2: nothing requested may be forbidden
+    parse_request "$request"
+    echo ""
+    echo "--- Request Facts ---"
+    echo "true:  ${ESN_FACTS[*]:-(none)}"
+    echo "false: ${ESN_NEGATED[*]:-(none)}"
+
+    local forbidden f
+    while IFS= read -r forbidden; do
+        [[ -z "$forbidden" ]] && continue
+        if fact_holds "$forbidden"; then
+            echo ""
+            echo "DECISION: DENY (request asserts forbidden act F($forbidden))"
+            return 1
+        fi
+    done < <(echo "$policy" | grep -oE '\bF\([^)]+\)' | sed -E 's/^F\((.*)\)$/\1/')
+
+    # Step 3: the antecedent must hold under the request's facts
+    local antecedent consequent
+    if split_top_level "$policy" "→"; then
+        antecedent="$SPLIT_LEFT"; consequent="$SPLIT_RIGHT"
+    else
+        antecedent="⊤"; consequent="$policy"
+    fi
+
+    # Read O(x) / □x / G(x) in the antecedent as "x holds", then substitute
+    # the request's truth values and let the boolean engine decide.
+    local projected=$(echo "$antecedent" | sed -E 's/[□◇]//g; s/\b[OPFG]\(/(/g')
+    local atoms=$(extract_atoms "$projected")
+    local substituted="$projected" atom
+    for atom in $atoms; do
+        if fact_holds "$atom"; then
+            substituted=$(echo "$substituted" | sed -E "s/\b${atom}\b/⊤/g")
+        else
+            substituted=$(echo "$substituted" | sed -E "s/\b${atom}\b/⊥/g")
+        fi
+    done
+    local verdict=$("${ENGINE_DIR}/boolean.sh" "$substituted" 2>&1 | head -1) || true
+
+    echo ""
+    echo "--- Antecedent Evaluation ---"
+    echo "antecedent:  $antecedent"
+    echo "under facts: $substituted"
+    echo "boolean:     $verdict"
+
+    case "$verdict" in
+        TAUTOLOGY) ;;
+        CONTRADICTION)
+            local unmet=""
+            for atom in $atoms; do fact_holds "$atom" || unmet="$unmet $atom"; done
+            echo ""
+            echo "DECISION: DENY (precondition not met:${unmet:- antecedent false})"
+            return 1 ;;
+        *)
+            echo ""
+            echo "DECISION: DENY (antecedent could not be evaluated: $verdict)"
+            return 1 ;;
+    esac
+
+    # Step 4: what does the policy grant?
+    local granted=$(echo "$consequent" | grep -oE '\bP\([^)]+\)' | sed -E 's/^P\((.*)\)$/\1/' | tr '\n' ' ')
+    granted="${granted% }"
+    echo ""
+    echo "--- Consequent ---"
+    echo "consequent: $consequent"
+    if [[ -n "${granted// /}" ]]; then
+        echo "permits:    $granted"
+        echo ""
+        echo "DECISION: ALLOW (permission granted: $granted)"
+        return 0
+    fi
+    echo "permits:    (nothing)"
+    echo ""
+    echo "DECISION: DENY (policy grants no permission for this request)"
+    return 1
 }
 
 # ============================================================================
@@ -337,11 +465,14 @@ usage() {
 Meta-Engine - Figure 24-26 Agentic Logic Composition
 
 Usage: $(basename "$0") [OPTIONS] EXPRESSION [PARADIGMS]
+       $(basename "$0") -a POLICY [REQUEST]
 
 OPTIONS:
     -c, --compose     Compose reasoning task (default)
     -v, --validate    Cross-system validation only
-    -a, --access      ESN access control mode
+    -a, --access      ESN access control: decide REQUEST against POLICY.
+                      REQUEST is ∧-separated facts, ¬ negates, unlisted is false.
+                      Last line is DECISION: ALLOW | DENY | CONFLICT (reason)
     -d, --decompose   Decompose expression by paradigm
     -h, --help        Show this help
 
@@ -349,7 +480,10 @@ MULTI-PARADIGM EXAMPLES:
     $(basename "$0") "□O(P) → O(P)"                    # Modal-Deontic
     $(basename "$0") "K_a(O(P)) → B_a(P)"              # Epistemic-Deontic
     $(basename "$0") "□(0.8) → P(action)"              # Modal-Fuzzy-Deontic
-    $(basename "$0") -a "O(auth) ∧ □P(access)"         # ESN access policy
+    $(basename "$0") -a "O(auth) → P(access)" "auth"            # DECISION: ALLOW
+    $(basename "$0") -a "O(auth) → P(access)" "¬auth"           # DECISION: DENY
+    $(basename "$0") -a "O(role=admin) → P(delete)" "role=user" # DECISION: DENY
+    $(basename "$0") -a "O(x) ∧ F(x)" "x"                       # DECISION: CONFLICT
 
 FIGURE 26 WORKFLOW:
     1. Enhanced Input Analysis  → detect paradigms
@@ -372,7 +506,7 @@ EOF
 main() {
     local mode="compose"
     local expression=""
-    local paradigms=""
+    local paradigms=""     # second positional: paradigms, or the REQUEST in -a mode
 
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -416,8 +550,9 @@ main() {
         fi
     fi
 
-    # Auto-detect paradigms if not provided
-    if [[ -z "$paradigms" ]]; then
+    # Auto-detect paradigms if not provided (in -a mode the second
+    # positional is the request, left as given, possibly empty)
+    if [[ -z "$paradigms" && "$mode" != "access" ]]; then
         paradigms=$(detect_paradigms "$expression")
     fi
 
@@ -432,7 +567,7 @@ main() {
             decompose_expression "$expression" "$paradigms"
             ;;
         access)
-            esn_access_decision "ACCESS_REQUEST" "$expression"
+            esn_access_decision "$expression" "$paradigms"
             ;;
     esac
 }

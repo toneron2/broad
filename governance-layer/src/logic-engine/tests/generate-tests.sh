@@ -127,7 +127,9 @@ generate_boolean_tests() {
 generate_modal_tests() {
     local output="${OUTPUT_DIR}/modal-tests.txt"
     echo "# Modal Logic Test Cases" > "$output"
-    echo "# Format: expression|system|expected_result" >> "$output"
+    echo "# Format: expression|system|expected_result[|worlds]" >> "$output"
+    echo "# worlds (optional) is the frame size passed to modal.sh -w; some" >> "$output"
+    echo "# non-theorems need three worlds before a counter-model exists." >> "$output"
     echo "" >> "$output"
 
     # K axiom (valid in all normal modal logics)
@@ -147,15 +149,15 @@ generate_modal_tests() {
     # 4 axiom (transitivity)
     echo "# === 4 AXIOM (S4, S5) ===" >> "$output"
     echo "□P → □□P|K|INVALID" >> "$output"
-    echo "□P → □□P|T|INVALID" >> "$output"
+    echo "□P → □□P|T|INVALID|3" >> "$output"
     echo "□P → □□P|S4|VALID" >> "$output"
     echo "□P → □□P|S5|VALID" >> "$output"
 
     # 5 axiom (euclidean)
     echo "# === 5 AXIOM (S5 only) ===" >> "$output"
     echo "◇P → □◇P|K|INVALID" >> "$output"
-    echo "◇P → □◇P|T|INVALID" >> "$output"
-    echo "◇P → □◇P|S4|INVALID" >> "$output"
+    echo "◇P → □◇P|T|INVALID|3" >> "$output"
+    echo "◇P → □◇P|S4|INVALID|3" >> "$output"
     echo "◇P → □◇P|S5|VALID" >> "$output"
 
     # B axiom (symmetry)
@@ -167,9 +169,12 @@ generate_modal_tests() {
     echo "□P ↔ ¬◇¬P|K|VALID" >> "$output"
     echo "◇P ↔ ¬□¬P|K|VALID" >> "$output"
 
-    # D axiom (seriality)
-    echo "# === D AXIOM ===" >> "$output"
-    echo "□P → ◇P|K|VALID" >> "$output"
+    # D axiom (seriality): needs every world to see some world, which K
+    # does not guarantee (the empty relation is a K frame).
+    echo "# === D AXIOM (D, T, S4, S5; not K) ===" >> "$output"
+    echo "□P → ◇P|K|INVALID" >> "$output"
+    echo "□P → ◇P|D|VALID" >> "$output"
+    echo "□P → ◇P|T|VALID" >> "$output"
 
     # Distribution over connectives
     echo "# === DISTRIBUTION ===" >> "$output"
@@ -229,10 +234,15 @@ generate_deontic_tests() {
     echo "O(P) ∧ F(P)|INCONSISTENT" >> "$output"
     echo "O(P) ∧ O(¬P)|INCONSISTENT" >> "$output"
 
-    # Access control patterns
+    # Access control patterns. "O(auth) → P(access)" is a policy, not a
+    # theorem of SDL (an obligation on auth says nothing about access), so
+    # validity is INVALID; the Security Agent checks policies for
+    # consistency, not validity.
     echo "# === ACCESS CONTROL ===" >> "$output"
-    echo "O(auth) → P(access)|VALID" >> "$output"
+    echo "O(auth) → P(access)|INVALID" >> "$output"
+    echo "O(auth) → P(auth)|VALID" >> "$output"
     echo "F(access) → ¬P(access)|VALID" >> "$output"
+    echo "O(auth) ∧ F(auth)|INCONSISTENT" >> "$output"
 
     echo "Generated $(wc -l < "$output") deontic tests"
 }
@@ -333,34 +343,52 @@ generate_esn_tests() {
     local output="${OUTPUT_DIR}/esn-tests.txt"
     echo "# ESN Access Control Test Cases" > "$output"
     echo "# Format: policy|request|expected_decision" >> "$output"
+    echo "# request: facts joined by ∧, ¬ negates, unlisted facts are false; may be empty" >> "$output"
+    echo "# Run through: engines/meta.sh -a POLICY REQUEST" >> "$output"
     echo "" >> "$output"
 
     # Basic access policies
     echo "# === BASIC ACCESS ===" >> "$output"
     echo "O(auth) → P(access)|auth|ALLOW" >> "$output"
-    echo "O(auth) → P(access)|no_auth|DENY" >> "$output"
+    echo "O(auth) → P(access)|¬auth|DENY" >> "$output"
+    echo "O(auth) → P(access)||DENY" >> "$output"
+    echo "P(read)|anything|ALLOW" >> "$output"
 
     # Prohibition
     echo "# === PROHIBITION ===" >> "$output"
     echo "F(admin_access)|admin_access|DENY" >> "$output"
+    echo "F(admin_access) ∧ P(read)|read|ALLOW" >> "$output"
+    echo "F(admin_access) ∧ P(read)|read ∧ admin_access|DENY" >> "$output"
+    echo "O(auth) → F(delete)|auth|DENY" >> "$output"
 
     # Compound policies
     echo "# === COMPOUND ===" >> "$output"
     echo "O(auth) ∧ O(verify) → P(access)|auth ∧ verify|ALLOW" >> "$output"
     echo "O(auth) ∧ O(verify) → P(access)|auth ∧ ¬verify|DENY" >> "$output"
+    echo "O(auth) ∨ O(consent) → P(access)|consent|ALLOW" >> "$output"
+    echo "O(auth) ∧ ¬O(suspended) → P(access)|auth|ALLOW" >> "$output"
+    echo "O(auth) ∧ ¬O(suspended) → P(access)|auth ∧ suspended|DENY" >> "$output"
 
     # Time-based access
     echo "# === TEMPORAL ===" >> "$output"
-    echo "G(O(log)) → P(access)|continuous_logging|ALLOW" >> "$output"
+    echo "G(O(log)) → P(access)|log|ALLOW" >> "$output"
+    echo "G(O(log)) → P(access)|¬log|DENY" >> "$output"
 
     # Role-based
     echo "# === ROLE-BASED ===" >> "$output"
-    echo "O(role=admin) → P(delete)|admin|ALLOW" >> "$output"
-    echo "O(role=admin) → P(delete)|user|DENY" >> "$output"
+    echo "O(role=admin) → P(delete)|role=admin|ALLOW" >> "$output"
+    echo "O(role=admin) → P(delete)|role=user|DENY" >> "$output"
+
+    # The Security Agent's own policy shape
+    echo "# === SECURITY AGENT POLICY ===" >> "$output"
+    echo "(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|auth ∧ role=nurse ∧ session|ALLOW" >> "$output"
+    echo "(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|auth ∧ role=nurse|DENY" >> "$output"
+    echo "(O(auth) ∧ O(role=nurse) ∧ □session) → P(read_patient_records)|role=nurse ∧ session|DENY" >> "$output"
 
     # Conflict detection
     echo "# === CONFLICT DETECTION ===" >> "$output"
-    echo "O(access) ∧ F(access)|any|CONFLICT" >> "$output"
+    echo "O(access) ∧ F(access)|access|CONFLICT" >> "$output"
+    echo "□¬P ∧ O(P)|P|CONFLICT" >> "$output"
 
     echo "Generated $(wc -l < "$output") ESN tests"
 }

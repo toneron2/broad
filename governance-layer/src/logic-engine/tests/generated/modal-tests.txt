@@ -1,5 +1,7 @@
 # Modal Logic Test Cases
-# Format: expression|system|expected_result
+# Format: expression|system|expected_result[|worlds]
+# worlds (optional) is the frame size passed to modal.sh -w; some
+# non-theorems need three worlds before a counter-model exists.
 
 # === K AXIOM (all systems) ===
 □(P → Q) → (□P → □Q)|K|VALID
@@ -13,21 +15,23 @@
 □P → P|S5|VALID
 # === 4 AXIOM (S4, S5) ===
 □P → □□P|K|INVALID
-□P → □□P|T|INVALID
+□P → □□P|T|INVALID|3
 □P → □□P|S4|VALID
 □P → □□P|S5|VALID
 # === 5 AXIOM (S5 only) ===
 ◇P → □◇P|K|INVALID
-◇P → □◇P|T|INVALID
-◇P → □◇P|S4|INVALID
+◇P → □◇P|T|INVALID|3
+◇P → □◇P|S4|INVALID|3
 ◇P → □◇P|S5|VALID
 # === B AXIOM ===
 P → □◇P|S5|VALID
 # === DUALITY ===
 □P ↔ ¬◇¬P|K|VALID
 ◇P ↔ ¬□¬P|K|VALID
-# === D AXIOM ===
-□P → ◇P|K|VALID
+# === D AXIOM (D, T, S4, S5; not K) ===
+□P → ◇P|K|INVALID
+□P → ◇P|D|VALID
+□P → ◇P|T|VALID
 # === DISTRIBUTION ===
 □(P ∧ Q) → (□P ∧ □Q)|K|VALID
 (□P ∧ □Q) → □(P ∧ Q)|K|VALID
