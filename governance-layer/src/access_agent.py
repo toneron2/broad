@@ -13,7 +13,10 @@ Architecture (Triple-Lock):
 
 Integration:
     The Logic Engine proof-of-concept at ./logic-engine/ provides
-    multi-paradigm formal reasoning (Boolean, Modal, Deontic).
+    multi-paradigm formal reasoning (Boolean, Modal, Deontic). Policies live
+    in policies/access.policy (see access_policies.py); a request's context
+    becomes facts, and engines/meta.sh -a decides the facts against the
+    policy for the resource and action.
 
 Usage:
     from access_agent import AccessAgent
@@ -41,6 +44,8 @@ from pathlib import Path
 from typing import Optional
 from datetime import datetime, timezone
 
+from access_policies import PolicyStore, get_policy_store
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("access_agent")
@@ -56,6 +61,13 @@ DEONTIC_ENGINE = LOGIC_ENGINE_DIR / "engines" / "deontic.sh"
 # arithmetic performs command substitution before it evaluates, so anything
 # outside this alphabet is rejected before it is built into an expression.
 IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
+
+# A request fact: an identifier, optionally "=value" (role=nurse).
+FACT = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(=[A-Za-z0-9_]+)?$")
+
+# The verdict line of engines/meta.sh -a
+RE_DECISION = re.compile(r"^DECISION:\s*(ALLOW|DENY|CONFLICT)\b\s*(.*)$", re.MULTILINE)
+RE_POLICY_PARADIGMS = re.compile(r"^Policy Paradigms:\s*(.*)$", re.MULTILINE)
 
 # Whole-word verdicts. "VALID" in result would also match "INVALID".
 RE_VALID = re.compile(r"(?<![A-Z])VALID(?![A-Z])")
@@ -78,6 +90,7 @@ class AccessDecision:
     confidence: float = 1.0
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     policy_expression: str = ""
+    request_facts: str = ""
 
     def to_dict(self) -> dict:
         return {
@@ -86,7 +99,8 @@ class AccessDecision:
             "paradigms_used": self.paradigms_used,
             "confidence": self.confidence,
             "timestamp": self.timestamp,
-            "policy_expression": self.policy_expression
+            "policy_expression": self.policy_expression,
+            "request_facts": self.request_facts
         }
 
 
@@ -117,14 +131,17 @@ class AccessAgent:
         - Meta: Cross-paradigm composition
     """
 
-    def __init__(self, strict_mode: bool = True):
+    def __init__(self, strict_mode: bool = True, policy_store: Optional[PolicyStore] = None):
         """
         Initialize the Access Agent.
 
         Args:
             strict_mode: If True, deny access on any engine failure
+            policy_store: Source of resource.action → policy (default:
+                policies/access.policy)
         """
         self.strict_mode = strict_mode
+        self.policies = policy_store or get_policy_store()
         self._verify_logic_engine()
         self._access_log: list[AccessDecision] = []
 
@@ -170,6 +187,16 @@ class AccessAgent:
         )
         return result.stdout.strip()
 
+    def _run_meta_access(self, policy: str, facts: str) -> str:
+        """Decide request facts against a policy (engines/meta.sh -a)."""
+        result = subprocess.run(
+            [str(META_ENGINE), "-a", policy, facts],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        return result.stdout.strip()
+
     def _run_deontic_engine(self, expression: str, check_consistency: bool = True) -> str:
         """Execute a deontic expression."""
         cmd = [str(DEONTIC_ENGINE)]
@@ -185,41 +212,28 @@ class AccessAgent:
         )
         return result.stdout.strip()
 
-    def _build_policy_expression(self, context: ResourceContext) -> str:
+    @staticmethod
+    def _build_request_facts(context: ResourceContext, extra_facts: list[str]) -> list[str]:
         """
-        Build a formal logic policy expression from context.
+        What is true of this request, in the request syntax of meta.sh -a.
 
-        ESN Policy Templates:
-            - Authentication required: O(auth) → P(access)
-            - Role-based: O(role=X) → P(action)
-            - Consent-based: O(consent) → P(data_access)
-            - Session-based: session_valid → P(continue)
+        The facts come from the request; the policy comes from the store.
+        Keeping those two sources apart is the point: a policy derived from
+        the request's own flags could never contradict the request.
         """
-        constraints = []
-
-        # Authentication constraint (deontic)
+        facts = []
         if context.authenticated:
-            constraints.append("O(auth)")
-
-        # Role constraint (deontic)
+            facts.append("auth")
         if context.user_role:
-            constraints.append(f"O(role={context.user_role})")
-
-        # Consent constraint (deontic)
+            facts.append(f"role={context.user_role}")
         if context.consent_given:
-            constraints.append("O(consent)")
-
-        # Session constraint (modal - necessary condition)
+            facts.append("consent")
         if context.session_valid:
-            constraints.append("□session")
-
-        # Build policy: all constraints must be met for permission
-        if constraints:
-            antecedent = " ∧ ".join(constraints)
-            return f"({antecedent}) → P({context.action}_{context.resource})"
-        else:
-            # No constraints met - access forbidden
-            return f"F({context.action}_{context.resource})"
+            facts.append("session")
+        for fact in extra_facts:
+            if fact not in facts:
+                facts.append(fact)
+        return facts
 
     def check_access(
         self,
@@ -236,10 +250,22 @@ class AccessAgent:
         Args:
             resource: The resource being accessed (e.g., "patient_records")
             action: The action being taken (e.g., "read", "write", "delete")
-            context: Additional context (role, authentication state, etc.)
+            context: Additional context: role, authenticated, consent,
+                session_valid, and facts (a list of further identifiers the
+                policy may refer to, e.g. ["verified"])
 
         Returns:
             AccessDecision with allowed/denied and reasoning trace
+
+        Decision:
+            1. resource, action, role and facts must be bare identifiers.
+            2. The policy for resource.action comes from the policy store;
+               none means DENY.
+            3. engines/meta.sh -a decides the request's facts against the
+               policy: ALLOW, DENY (with the unmet precondition) or
+               CONFLICT (the policy is inconsistent).
+            4. Authentication is required for every ALLOW, whatever the
+               policy says (defence in depth).
         """
         ctx = context or {}
 
@@ -253,6 +279,7 @@ class AccessAgent:
             session_valid=ctx.get("session_valid", False),
             custom_constraints=ctx.get("constraints", {})
         )
+        extra_facts = [str(f) for f in (ctx.get("facts") or [])]
 
         # Reject anything that is not a bare identifier before it reaches
         # the shell engines (see IDENTIFIER).
@@ -262,6 +289,8 @@ class AccessAgent:
             )
             if value is not None and not is_identifier(value)
         ]
+        if any(not FACT.match(f) for f in extra_facts):
+            bad.append("facts")
         if bad:
             decision = AccessDecision(
                 allowed=False,
@@ -277,45 +306,47 @@ class AccessAgent:
             )
             return decision
 
-        # Build formal policy expression
-        policy_expr = self._build_policy_expression(res_ctx)
+        facts = self._build_request_facts(res_ctx, extra_facts)
+        facts_expr = " ∧ ".join(facts)
 
-        # Evaluate through Logic Engine.
-        #
-        # What the engine contributes: it checks the policy is well formed
-        # and consistent across paradigms (no O(x) ∧ F(x), no □¬x ∧ O(x))
-        # and records the derivation. What it cannot contribute: "(O(auth)
-        # ∧ ...) → P(read)" is a policy, not a theorem, so its validity says
-        # nothing about this request; the request's facts are the context
-        # flags. Authentication is therefore a hard requirement here, and a
-        # conflicting or unevaluable policy denies.
+        # The policy comes from the store, never from the request
+        policy = self.policies.lookup(resource, action)
+        if policy is None:
+            decision = AccessDecision(
+                allowed=False,
+                reasoning_trace=f"DENY: no policy for {resource}.{action} (deny by default)",
+                paradigms_used=[],
+                confidence=1.0,
+                policy_expression=f"F({action}_{resource})",
+                request_facts=facts_expr,
+            )
+            self._access_log.append(decision)
+            logger.info(f"Access decision: resource={resource} action={action} allowed=False (no policy)")
+            return decision
+
         try:
-            result = self._run_meta_engine(policy_expr)
+            result = self._run_meta_access(policy.expression, facts_expr)
 
-            paradigms_match = RE_PARADIGMS.search(result)
+            paradigms_match = RE_POLICY_PARADIGMS.search(result)
             paradigms = paradigms_match.group(1).split() if paradigms_match else []
+            verdicts = RE_DECISION.findall(result)
+            verdict, reason = verdicts[-1] if verdicts else ("DENY", "(engine returned no decision)")
 
-            trace_lines = []
-            engine_ok = True
-            if RE_ERROR.search(result):
-                engine_ok = False
-                trace_lines.append("DENY: logic engine reported an error")
-            if RE_CONFLICT.search(result):
-                engine_ok = False
-                trace_lines.append("DENY: policy is inconsistent across paradigms")
-            if not res_ctx.authenticated:
-                trace_lines.append("DENY: authentication required")
-
-            allowed = engine_ok and res_ctx.authenticated
-            if allowed:
-                trace_lines.append("ALLOW: authenticated, policy consistent")
+            trace_lines = [f"{verdict}: {reason.strip() or 'policy ' + policy.key} [{policy.source}]"]
+            allowed = verdict == "ALLOW"
+            if allowed and not res_ctx.authenticated:
+                # The store should never grant an unauthenticated request;
+                # if a policy does, authentication still wins.
+                allowed = False
+                trace_lines.insert(0, "DENY: authentication required")
 
             decision = AccessDecision(
                 allowed=allowed,
                 reasoning_trace="\n".join(trace_lines) + "\n" + result,
                 paradigms_used=paradigms,
-                confidence=1.0 if engine_ok else 0.0,
-                policy_expression=policy_expr
+                confidence=1.0 if verdicts else 0.0,
+                policy_expression=policy.expression,
+                request_facts=facts_expr,
             )
 
         except subprocess.TimeoutExpired:
@@ -324,7 +355,8 @@ class AccessAgent:
                 reasoning_trace="TIMEOUT: Logic Engine did not respond in time",
                 paradigms_used=[],
                 confidence=0.0,
-                policy_expression=policy_expr
+                policy_expression=policy.expression,
+                request_facts=facts_expr,
             )
 
         except Exception as e:
@@ -333,14 +365,15 @@ class AccessAgent:
                 reasoning_trace=f"ERROR: {str(e)}",
                 paradigms_used=[],
                 confidence=0.0,
-                policy_expression=policy_expr
+                policy_expression=policy.expression,
+                request_facts=facts_expr,
             )
 
         # Log decision for audit
         self._access_log.append(decision)
         logger.info(
             f"Access decision: resource={resource} action={action} "
-            f"allowed={decision.allowed} paradigms={decision.paradigms_used}"
+            f"facts=[{facts_expr}] allowed={decision.allowed} paradigms={decision.paradigms_used}"
         )
 
         return decision
@@ -488,7 +521,18 @@ if __name__ == "__main__":
     )
     print(f"  Allowed: {decision.allowed}")
     print(f"  Paradigms: {decision.paradigms_used}")
+    print(f"  Facts: {decision.request_facts}")
     print(f"  Policy: {decision.policy_expression}")
+
+    # Test 1b: Authenticated nurse, but no live session
+    print("\n[Test 1b] Authenticated nurse without a heartbeat session:")
+    decision = agent.check_access(
+        resource="patient_records",
+        action="read",
+        context={"role": "nurse", "authenticated": True}
+    )
+    print(f"  Allowed: {decision.allowed}")
+    print(f"  Reason: {decision.reasoning_trace.splitlines()[0]}")
 
     # Test 2: Unauthenticated access attempt
     print("\n[Test 2] Unauthenticated access attempt:")

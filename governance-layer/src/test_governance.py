@@ -30,10 +30,11 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 
 # Import governance components
-from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer
+from guardrails_loader import GuardrailsEnforcer, AgentType, get_enforcer, evaluate_condition
 from access_agent import AccessAgent
+from access_policies import PolicyStore
 from governed_access import GovernanceGateway, governed_mcp_tool
-from heartbeat import HeartbeatManager, HeartbeatPayload, DeviceInfo, SessionState
+from heartbeat import HeartbeatManager, HeartbeatPayload, DeviceInfo, SessionState, accept_any_token
 
 
 @dataclass
@@ -62,7 +63,9 @@ class GovernanceTestSuite:
     def _init_gateway(self):
         """Initialize gateway (expensive, only when needed)."""
         if self.gateway is None:
-            self.gateway = GovernanceGateway()
+            self.gateway = GovernanceGateway(
+                heartbeat_manager=HeartbeatManager(token_validator=accept_any_token)
+            )
 
     def log(self, msg: str):
         """Log if verbose mode."""
@@ -284,6 +287,153 @@ class GovernanceTestSuite:
             self.log(f"{'✓' if r.passed else '✗'} {r.name}")
         return results
 
+    def test_conditional_permissions(self) -> list[TestResult]:
+        """A "P(x) ← cond" permission is enforced when x is exercised."""
+        results = []
+
+        cases = [
+            # Scheme 1: P(execute_verified_tool) ← authorized(user) ∧ registered(tool)
+            ("tool_agent", "execute_verified_tool", {}, False, "no facts"),
+            ("tool_agent", "execute_verified_tool", {"authorized": True}, False, "only authorized"),
+            ("tool_agent", "execute_verified_tool",
+             {"authorized": True, "facts": ["registered(tool)"]}, True, "authorized and registered"),
+            # Scheme 1: P(route_to_evo_agent) ← authenticated(user) ∧ bounded(request)
+            ("routing_agent", "route_to_evo_agent", {"authenticated": True}, False, "unbounded request"),
+            ("routing_agent", "route_to_evo_agent",
+             {"authenticated": True, "facts": ["bounded"]}, True, "bounded request"),
+            # Scheme 1: P(call_mcp_tool) ← registered(tool) ∧ authorized(user) ∧ access_granted
+            ("tool_agent", "call_mcp_tool",
+             {"authorized": True, "access_granted": True}, False, "tool not registered"),
+            ("tool_agent", "call_mcp_tool",
+             {"authorized": True, "access_granted": True, "facts": ["registered(tool)"]}, True,
+             "all three conditions"),
+            # Scheme 2: P(propose_optimization) ← existing_component ∧ within_bounds
+            ("designer_agent", "propose_optimization", {"within_bounds": True}, False, "no existing component"),
+            ("designer_agent", "propose_optimization",
+             {"within_bounds": True, "existing_component": True}, True, "existing component in bounds"),
+        ]
+
+        for agent, action, context, expected, label in cases:
+            allowed, reason = self.enforcer.check_action(action, agent, context)
+            passed = allowed == expected
+            results.append(TestResult(
+                name=f"{agent}: {action} ({label})",
+                category="guardrails",
+                passed=passed,
+                expected="ALLOWED" if expected else "DENIED",
+                actual="ALLOWED" if allowed else "DENIED",
+                notes=reason
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        # ∨ and ∧ precedence in a condition
+        cond = "learning_failure ∨ design_failure"
+        evals = [
+            (evaluate_condition(cond, {"design_failure": True}), True),
+            (evaluate_condition(cond, {}), False),
+            (evaluate_condition("a ∧ b ∨ c", {"c": True}), True),
+            (evaluate_condition("a ∧ b ∨ c", {"a": True}), False),
+            (evaluate_condition("a ∧ ???", {"a": True}), None),
+        ]
+        passed = all(got == want for got, want in evals)
+        results.append(TestResult(
+            name="Condition evaluation (∧ binds tighter than ∨, malformed → None)",
+            category="guardrails",
+            passed=passed,
+            expected=str([w for _, w in evals]),
+            actual=str([g for g, _ in evals])
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_conditional_obligations(self) -> list[TestResult]:
+        """An "O(y) ← cond" obligation binds when its condition holds."""
+        results = []
+
+        # Scheme 1: O(verify_evo_request) ← request_from_evo
+        base = {"authorized": True, "facts": ["registered(tool)"]}
+        cases = [
+            ("tool_agent", "execute_verified_tool", {**base}, True, "not from EVO"),
+            ("tool_agent", "execute_verified_tool", {**base, "request_from_evo": True}, False,
+             "from EVO, not verified"),
+            ("tool_agent", "execute_verified_tool",
+             {**base, "request_from_evo": True, "performed_actions": ["verify_evo_request"]}, True,
+             "from EVO, verified"),
+            # Scheme 3: P(compose) → O(verify_composition_result)
+            ("composer_agent", "compose_verified_components",
+             {"facts": ["all_components_verified"]}, False, "composition not verified"),
+            ("composer_agent", "compose_verified_components",
+             {"facts": ["all_components_verified"], "performed_actions": ["verify_composition_result"]},
+             True, "composition verified"),
+        ]
+
+        for agent, action, context, expected, label in cases:
+            allowed, reason = self.enforcer.check_action(action, agent, context)
+            passed = allowed == expected
+            results.append(TestResult(
+                name=f"{agent}: {action} ({label})",
+                category="guardrails",
+                passed=passed,
+                expected="ALLOWED" if expected else "DENIED",
+                actual="ALLOWED" if allowed else "DENIED",
+                notes=reason
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_temporal_bounds(self) -> list[TestResult]:
+        """□(metric op limit) bounds are checked against measured values."""
+        results = []
+
+        cases = [
+            ("tool_agent", {"idle_session_timeout": 29 * 60}, True, "idle 29 min"),
+            ("tool_agent", {"idle_session_timeout": 31 * 60}, False, "idle 31 min"),
+            ("tool_agent", {"maximum_session_duration": 23 * 3600}, True, "session 23 h"),
+            ("tool_agent", {"maximum_session_duration": 25 * 3600}, False, "session 25 h"),
+            ("routing_agent", {"route_retry": 3}, True, "3 retries"),
+            ("routing_agent", {"route_retry": 4}, False, "4 retries"),
+            ("tool_agent", {"tool_response": 6}, False, "tool response 6 s (bound carried a comment)"),
+            ("designer_agent", {"memory_usage": 600 * 1024 ** 2}, False, "designer memory 600 MB"),
+            ("designer_agent", {"cpu_usage": 40}, True, "designer cpu 40 %"),
+            ("composer_agent", {"workflow_steps": 51}, False, "51 workflow steps"),
+            ("tool_agent", {"unbounded_metric": 10 ** 9}, True, "metric with no bound"),
+            ("security_agent", {"security_decision": 0.04}, True, "decision in 40 ms"),
+            ("security_agent", {"security_decision": 0.6}, False, "decision in 600 ms"),
+        ]
+
+        for agent, metrics, expected, label in cases:
+            ok, violations = self.enforcer.check_temporal_bounds(agent, metrics)
+            passed = ok == expected
+            results.append(TestResult(
+                name=f"Temporal bound: {label}",
+                category="guardrails",
+                passed=passed,
+                expected="HOLDS" if expected else "VIOLATED",
+                actual="HOLDS" if ok else "VIOLATED",
+                notes="; ".join(violations)
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        # Every □ constraint is either checkable or explicitly listed as not
+        enforceable = sum(len(sch.temporal_bounds()[0]) for sch in self.enforcer.loader.schemes.values())
+        unenforceable = self.enforcer.unenforceable_temporal()
+        total_temporal = sum(len(sch.temporal) for sch in self.enforcer.loader.schemes.values())
+        listed = sum(len(v) for v in unenforceable.values())
+        passed = enforceable + listed == total_temporal and enforceable >= 30
+        results.append(TestResult(
+            name=f"Temporal constraints accounted for ({enforceable} checkable, {listed} symbolic)",
+            category="guardrails",
+            passed=passed,
+            expected=str(total_temporal),
+            actual=str(enforceable + listed),
+            notes=str(unenforceable)
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
     # =========================================================================
     # Category 2: Logic Engine Integration
     # =========================================================================
@@ -295,11 +445,10 @@ class GovernanceTestSuite:
         try:
             agent = AccessAgent()
 
-            # Test tautology
             decision = agent.check_access(
-                resource="test",
-                action="test",
-                context={"authenticated": True, "role": "admin"}
+                resource="patient_records",
+                action="read",
+                context={"authenticated": True, "role": "admin", "session_valid": True}
             )
 
             result = TestResult(
@@ -323,54 +472,167 @@ class GovernanceTestSuite:
 
         return results
 
-    def test_policy_expression_generation(self) -> list[TestResult]:
-        """Test that policy expressions are generated correctly."""
+    def test_request_facts(self) -> list[TestResult]:
+        """The request's context becomes facts; the policy comes from the store."""
         results = []
-
         agent = AccessAgent()
+        stored = agent.policies.lookup("patient_records", "read").expression
 
         test_cases = [
-            {
-                "context": {"authenticated": True},
-                "expected_contains": "O(auth)"
-            },
-            {
-                "context": {"role": "provider"},
-                "expected_contains": "O(role=provider)"
-            },
-            {
-                "context": {"session_valid": True},
-                "expected_contains": "□session"
-            },
-            {
-                "context": {},  # No context = forbidden
-                "expected_contains": "F("
-            },
+            ({"authenticated": True}, "auth"),
+            ({"role": "provider"}, "role=provider"),
+            ({"session_valid": True}, "session"),
+            ({"consent": True}, "consent"),
+            ({"facts": ["verified"]}, "verified"),
         ]
 
-        for tc in test_cases:
-            decision = agent.check_access(
-                resource="test",
-                action="test",
-                context=tc["context"]
-            )
-
-            passed = tc["expected_contains"] in decision.policy_expression
-
-            result = TestResult(
-                name=f"Policy contains {tc['expected_contains']}",
+        for context, expected_fact in test_cases:
+            decision = agent.check_access("patient_records", "read", context)
+            facts = decision.request_facts.split(" ∧ ")
+            passed = expected_fact in facts and decision.policy_expression == stored
+            results.append(TestResult(
+                name=f"Context {context} becomes fact {expected_fact}; policy is the stored one",
                 category="logic_engine",
                 passed=passed,
-                expected=tc["expected_contains"],
-                actual=decision.policy_expression[:50] + "..."
-            )
-            results.append(result)
-            self.log(f"{'✓' if result.passed else '✗'} {result.name}")
+                expected=f"{expected_fact} in facts, stored policy",
+                actual=f"facts=[{decision.request_facts}] policy_is_stored={decision.policy_expression == stored}"
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        decision = agent.check_access("patient_records", "read", {})
+        passed = decision.request_facts == "" and decision.policy_expression == stored and not decision.allowed
+        results.append(TestResult(
+            name="Empty context: no facts, stored policy, denied",
+            category="logic_engine",
+            passed=passed,
+            expected="no facts, denied",
+            actual=f"facts=[{decision.request_facts}] allowed={decision.allowed}"
+        ))
+        self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
+
+        return results
+
+    def test_policy_store(self) -> list[TestResult]:
+        """Policies load from policies/access.policy with wildcard precedence."""
+        results = []
+        agent = AccessAgent()
+        store = agent.policies
+
+        passed = len(store) >= 8 and not store.rejected
+        results.append(TestResult(
+            name=f"Policy file loads cleanly ({len(store)} policies)",
+            category="logic_engine",
+            passed=passed,
+            expected=">= 8 policies, 0 rejected",
+            actual=f"{len(store)} policies, rejected={store.rejected}"
+        ))
+
+        exact = store.lookup("patient_records", "delete")
+        wildcard = store.lookup("patient_records", "export")
+        none = store.lookup("launch_codes", "read")
+        passed = (exact is not None and "role=admin" in exact.expression
+                  and wildcard is not None and wildcard.action == "*"
+                  and none is None)
+        results.append(TestResult(
+            name="Lookup: exact beats resource.*; unknown resource has no policy",
+            category="logic_engine",
+            passed=passed,
+            expected="exact / wildcard / None",
+            actual=f"{exact and exact.key} / {wildcard and wildcard.key} / {none}"
+        ))
+
+        # Decisions that follow from the store
+        cases = [
+            ("patient_records", "export", {"authenticated": True, "role": "admin", "session_valid": True},
+             False, "resource.* prohibition"),
+            ("launch_codes", "read", {"authenticated": True, "role": "admin", "session_valid": True},
+             False, "no policy at all"),
+            ("patient_records", "delete", {"authenticated": True, "role": "admin", "session_valid": True},
+             True, "admin may delete"),
+            ("patient_records", "delete", {"authenticated": True, "role": "nurse", "session_valid": True},
+             False, "nurse may not delete"),
+            ("patient_records", "write", {"authenticated": True, "role": "provider", "session_valid": True},
+             False, "write without consent"),
+            ("patient_records", "write",
+             {"authenticated": True, "role": "provider", "session_valid": True, "consent": True},
+             True, "write with consent"),
+            ("workflow", "deploy", {"authenticated": True, "role": "admin"}, False, "deploy unverified"),
+            ("workflow", "deploy", {"authenticated": True, "role": "admin", "facts": ["verified"]},
+             True, "deploy verified (fact from context)"),
+        ]
+        for resource, action, context, expected, label in cases:
+            decision = agent.check_access(resource, action, context)
+            passed = decision.allowed == expected
+            results.append(TestResult(
+                name=f"{resource}.{action}: {label}",
+                category="logic_engine",
+                passed=passed,
+                expected="ALLOWED" if expected else "DENIED",
+                actual="ALLOWED" if decision.allowed else "DENIED",
+                notes=decision.reasoning_trace.splitlines()[0]
+            ))
+
+        # A malformed or unsafe policy line is refused at load time
+        import tempfile as _tf
+        with _tf.NamedTemporaryFile("w", suffix=".policy", delete=False) as f:
+            f.write("good.read: O(auth) → P(read)\n")
+            f.write("bad.read: O(auth) → P(read) ; rm -rf /\n")
+            f.write("this is not a policy line\n")
+            f.write("worse.read: O(auth) → P(`id`)\n")
+            tmp = f.name
+        try:
+            small = PolicyStore(tmp)
+            passed = len(small) == 1 and small.lookup("good", "read") is not None and len(small.rejected) == 3
+            results.append(TestResult(
+                name="Unsafe or malformed policy lines are rejected at load",
+                category="logic_engine",
+                passed=passed,
+                expected="1 loaded, 3 rejected",
+                actual=f"{len(small)} loaded, {len(small.rejected)} rejected"
+            ))
+        finally:
+            os.remove(tmp)
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
+    def test_policy_parity_with_engine(self) -> list[TestResult]:
+        """The Python agent and meta.sh -a decide the same cases the same way."""
+        import re
+        import subprocess
+        from access_agent import META_ENGINE
+        results = []
+        agent = AccessAgent()
+        policy = agent.policies.lookup("patient_records", "read").expression
+
+        cases = [
+            ("auth ∧ role=nurse ∧ session", {"authenticated": True, "role": "nurse", "session_valid": True}),
+            ("auth ∧ role=nurse", {"authenticated": True, "role": "nurse"}),
+            ("role=nurse ∧ session", {"role": "nurse", "session_valid": True}),
+            ("auth ∧ role=janitor ∧ session", {"authenticated": True, "role": "janitor", "session_valid": True}),
+            ("auth", {"authenticated": True}),
+            ("", {}),
+        ]
+        for facts, context in cases:
+            out = subprocess.run([str(META_ENGINE), "-a", policy, facts], capture_output=True, text=True).stdout
+            engine = re.findall(r"^DECISION: (\w+)", out, re.M)[-1]
+            decision = agent.check_access("patient_records", "read", context)
+            python = "ALLOW" if decision.allowed else "DENY"
+            passed = engine == python and decision.request_facts == facts
+            results.append(TestResult(
+                name=f"Parity on facts [{facts or 'none'}]",
+                category="logic_engine",
+                passed=passed,
+                expected=f"engine {engine}",
+                actual=f"python {python}, facts=[{decision.request_facts}]"
+            ))
+            self.log(f"{'✓' if passed else '✗'} {results[-1].name}")
 
         return results
 
     def test_authentication_required(self) -> list[TestResult]:
-        """No context flag other than authentication can grant access."""
+        """Access requires authentication and the policy's preconditions."""
         results = []
         agent = AccessAgent()
 
@@ -380,9 +642,14 @@ class GovernanceTestSuite:
             ({"session_valid": True}, False, "valid session alone"),
             ({"role": "provider", "consent": True, "session_valid": True}, False,
              "everything except authentication"),
-            ({"authenticated": True}, True, "authentication alone"),
+            ({"authenticated": True}, False, "authentication alone (policy needs role and session)"),
+            ({"authenticated": True, "role": "provider"}, False, "authenticated provider without session"),
+            ({"authenticated": True, "role": "janitor", "session_valid": True}, False,
+             "authenticated janitor with session (role not permitted)"),
             ({"authenticated": True, "role": "provider", "session_valid": True}, True,
-             "authentication with role and session"),
+             "authenticated provider with session"),
+            ({"authenticated": True, "role": "nurse", "session_valid": True}, True,
+             "authenticated nurse with session"),
         ]
 
         for context, expected_allowed, label in test_cases:
@@ -678,6 +945,90 @@ class GovernanceTestSuite:
             self.log(f"{'✓' if r.passed else '✗'} {r.name}")
         return results
 
+    async def test_session_temporal_bounds(self) -> list[TestResult]:
+        """The gateway denies a session past the Scheme 0 idle/duration bounds."""
+        results = []
+        self._init_gateway()
+        manager = self.gateway.heartbeat_manager
+        now = datetime.now(timezone.utc)
+        ctx = {"role": "provider"}
+
+        async def fresh_session():
+            session = await manager.register_device(DeviceInfo("tb-dev", "simulation"))
+            await manager.process_heartbeat(
+                HeartbeatPayload("tb-dev", session.session_id, 1, now.isoformat(), auth_token="tok")
+            )
+            return session
+
+        session = await fresh_session()
+        decision = await self.gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", ctx)
+        results.append(TestResult(
+            name="Fresh authenticated session is allowed",
+            category="complete_flow",
+            passed=decision.allowed,
+            expected="ALLOWED",
+            actual="ALLOWED" if decision.allowed else "DENIED",
+            notes="; ".join(decision.reasoning_trace[:3])
+        ))
+
+        session = await fresh_session()
+        session.last_heartbeat = now - timedelta(minutes=31)
+        decision = await self.gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", ctx)
+        passed = (not decision.allowed
+                  and any("idle_session_timeout" in v for v in decision.temporal_violations))
+        results.append(TestResult(
+            name="Session idle 31 minutes is denied by □(idle_session_timeout ≤ 30m)",
+            category="complete_flow",
+            passed=passed,
+            expected="DENIED, idle bound named",
+            actual=("DENIED" if not decision.allowed else "ALLOWED") + f" {decision.temporal_violations}"
+        ))
+
+        session = await fresh_session()
+        session.created_at = (now - timedelta(hours=25)).isoformat()
+        decision = await self.gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", ctx)
+        passed = (not decision.allowed
+                  and any("maximum_session_duration" in v for v in decision.temporal_violations))
+        results.append(TestResult(
+            name="Session 25 hours old is denied by □(maximum_session_duration ≤ 24h)",
+            category="complete_flow",
+            passed=passed,
+            expected="DENIED, duration bound named",
+            actual=("DENIED" if not decision.allowed else "ALLOWED") + f" {decision.temporal_violations}"
+        ))
+
+        # Caller-supplied metrics are checked too
+        decision = await self.gateway.check_access(
+            None, "routing_agent", "router", "route_to_registered_agent",
+            {"authenticated": True, "metrics": {"route_retry": 5}}
+        )
+        passed = not decision.allowed and any("route_retry" in v for v in decision.temporal_violations)
+        results.append(TestResult(
+            name="Caller metric route_retry=5 is denied by □(route_retry ≤ 3)",
+            category="complete_flow",
+            passed=passed,
+            expected="DENIED, retry bound named",
+            actual=("DENIED" if not decision.allowed else "ALLOWED") + f" {decision.temporal_violations}"
+        ))
+
+        # The decision latency bound is reported, never enforced
+        decision = await self.gateway.check_access(None, "tool_agent", "patient_records", "read",
+                                                   {"authenticated": True, "role": "provider", "session_valid": True})
+        over = decision.latency_ms > 50
+        reported = any("security_decision" in v for v in decision.temporal_violations)
+        passed = decision.allowed and (reported == over)
+        results.append(TestResult(
+            name="□(security_decision ≤ 50ms) is reported, not enforced",
+            category="complete_flow",
+            passed=passed,
+            expected=f"ALLOWED, reported={over}",
+            actual=f"{'ALLOWED' if decision.allowed else 'DENIED'}, reported={reported} ({decision.latency_ms:.0f}ms)"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
     # =========================================================================
     # Category 5: Heartbeat Sessions
     # =========================================================================
@@ -746,6 +1097,157 @@ class GovernanceTestSuite:
 
         return results
 
+    async def test_heartbeat_authentication(self) -> list[TestResult]:
+        """Tokens are checked by the configured validator; none means never."""
+        results = []
+        ts = datetime.now(timezone.utc).isoformat()
+
+        # No validator: a token never authenticates
+        manager = HeartbeatManager()
+        session = await manager.register_device(DeviceInfo("auth-1", "simulation"))
+        response = await manager.process_heartbeat(HeartbeatPayload("auth-1", session.session_id, 1, ts, auth_token="tok"))
+        passed = (response["status"] == "ok" and not session.auth_verified
+                  and response.get("auth") == "no_validator"
+                  and not await manager.check_session_health(session.session_id))
+        results.append(TestResult(
+            name="Without a validator a token never authenticates",
+            category="heartbeat",
+            passed=passed,
+            expected="auth_verified=False, auth=no_validator",
+            actual=f"auth_verified={session.auth_verified}, auth={response.get('auth')}"
+        ))
+
+        # A validator decides, per device; a rejected token revokes
+        def only_device_two(token, device_id):
+            return token == "secret" and device_id == "auth-2"
+
+        manager = HeartbeatManager(token_validator=only_device_two)
+        s2 = await manager.register_device(DeviceInfo("auth-2", "simulation"))
+        s3 = await manager.register_device(DeviceInfo("auth-3", "simulation"))
+        r_ok = await manager.process_heartbeat(HeartbeatPayload("auth-2", s2.session_id, 1, ts, auth_token="secret"))
+        r_wrong_dev = await manager.process_heartbeat(HeartbeatPayload("auth-3", s3.session_id, 1, ts, auth_token="secret"))
+        r_none = await manager.process_heartbeat(HeartbeatPayload("auth-2", s2.session_id, 2, ts))
+        still_verified = s2.auth_verified
+        r_bad = await manager.process_heartbeat(HeartbeatPayload("auth-2", s2.session_id, 3, ts, auth_token="wrong"))
+        passed = (r_ok.get("auth") == "verified" and r_wrong_dev.get("auth") == "rejected"
+                  and not s3.auth_verified and "auth" not in r_none and still_verified
+                  and r_bad.get("auth") == "rejected" and not s2.auth_verified)
+        results.append(TestResult(
+            name="Validator verifies per device, no token keeps state, bad token revokes",
+            category="heartbeat",
+            passed=passed,
+            expected="verified / rejected / kept / revoked",
+            actual=f"{r_ok.get('auth')} / {r_wrong_dev.get('auth')} / kept={still_verified} / {r_bad.get('auth')} verified={s2.auth_verified}"
+        ))
+
+        # An async validator and a raising validator
+        async def async_validator(token, device_id):
+            return token == "async-ok"
+
+        def broken_validator(token, device_id):
+            raise RuntimeError("IAM unreachable")
+
+        manager = HeartbeatManager(token_validator=async_validator)
+        s4 = await manager.register_device(DeviceInfo("auth-4", "simulation"))
+        r_async = await manager.process_heartbeat(HeartbeatPayload("auth-4", s4.session_id, 1, ts, auth_token="async-ok"))
+        manager = HeartbeatManager(token_validator=broken_validator)
+        s5 = await manager.register_device(DeviceInfo("auth-5", "simulation"))
+        r_broken = await manager.process_heartbeat(HeartbeatPayload("auth-5", s5.session_id, 1, ts, auth_token="tok"))
+        passed = (r_async.get("auth") == "verified" and s4.auth_verified
+                  and r_broken.get("auth") == "rejected" and not s5.auth_verified)
+        results.append(TestResult(
+            name="Async validator works; a raising validator fails closed",
+            category="heartbeat",
+            passed=passed,
+            expected="verified / rejected",
+            actual=f"{r_async.get('auth')} / {r_broken.get('auth')}"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
+    async def test_heartbeat_lifecycle(self) -> list[TestResult]:
+        """Terminated sessions are purged and the gateway starts the monitor."""
+        results = []
+        now = datetime.now(timezone.utc)
+
+        manager = HeartbeatManager(terminated_retention_seconds=60)
+        kept = await manager.register_device(DeviceInfo("lc-1", "simulation"))
+        old = await manager.register_device(DeviceInfo("lc-2", "simulation"))
+        recent = await manager.register_device(DeviceInfo("lc-3", "simulation"))
+        manager.terminate_session(old.session_id, "test")
+        manager.terminate_session(recent.session_id, "test")
+        old.terminated_at = now - timedelta(seconds=61)
+        recent.terminated_at = now - timedelta(seconds=10)
+        removed = manager.purge_terminated(now)
+        passed = (removed == 1 and old.session_id not in manager.sessions
+                  and recent.session_id in manager.sessions and kept.session_id in manager.sessions)
+        results.append(TestResult(
+            name="Purge removes sessions terminated longer than the retention window",
+            category="heartbeat",
+            passed=passed,
+            expected="1 removed, recent and live kept",
+            actual=f"{removed} removed, sessions={len(manager.sessions)}"
+        ))
+
+        # A late heartbeat to a purged session gets unknown_session, to a
+        # recently terminated one gets session_terminated
+        ts = now.isoformat()
+        r_purged = await manager.process_heartbeat(HeartbeatPayload("lc-2", old.session_id, 1, ts))
+        r_recent = await manager.process_heartbeat(HeartbeatPayload("lc-3", recent.session_id, 1, ts))
+        passed = r_purged.get("error") == "unknown_session" and r_recent.get("error") == "session_terminated"
+        results.append(TestResult(
+            name="Late heartbeats distinguish purged from recently terminated",
+            category="heartbeat",
+            passed=passed,
+            expected="unknown_session / session_terminated",
+            actual=f"{r_purged.get('error')} / {r_recent.get('error')}"
+        ))
+
+        # Monitor pass terminates and later purges without manual calls
+        manager = HeartbeatManager(terminated_retention_seconds=0)
+        session = await manager.register_device(DeviceInfo("lc-4", "simulation"))
+        session.last_heartbeat = now - timedelta(seconds=20)
+        await manager.check_sessions_once(now)
+        terminated = session.state == SessionState.TERMINATED
+        await manager.check_sessions_once(now + timedelta(seconds=1))
+        passed = terminated and session.session_id not in manager.sessions
+        results.append(TestResult(
+            name="Monitor terminates an idle session and purges it after retention",
+            category="heartbeat",
+            passed=passed,
+            expected="terminated then purged",
+            actual=f"terminated={terminated}, present={session.session_id in manager.sessions}"
+        ))
+
+        # The gateway starts the monitor on its first session-bound check
+        gateway = GovernanceGateway(
+            enforcer=self.enforcer,
+            access_agent=AccessAgent(),
+            heartbeat_manager=HeartbeatManager(token_validator=accept_any_token)
+        )
+        before = gateway.heartbeat_manager._monitor_task
+        session = await gateway.heartbeat_manager.register_device(DeviceInfo("lc-5", "simulation"))
+        await gateway.check_access(session.session_id, "tool_agent", "patient_records", "read", {})
+        task = gateway.heartbeat_manager._monitor_task
+        running = task is not None and not task.done()
+        gateway.close()
+        await asyncio.sleep(0)
+        stopped = gateway.heartbeat_manager._monitor_task is None and (task.cancelled() or task.done())
+        passed = before is None and running and stopped
+        results.append(TestResult(
+            name="Gateway starts the heartbeat monitor on first use and close() stops it",
+            category="heartbeat",
+            passed=passed,
+            expected="not running / running / stopped",
+            actual=f"before={before} running={running} stopped={stopped}"
+        ))
+
+        for r in results:
+            self.log(f"{'✓' if r.passed else '✗'} {r.name}")
+        return results
+
     async def test_heartbeat_session_integrity(self) -> list[TestResult]:
         """Re-registration, replayed sequence numbers and device mismatch."""
         results = []
@@ -807,6 +1309,9 @@ class GovernanceTestSuite:
                 self.test_scheme_specific_constraints,
                 self.test_unknown_agent_denied,
                 self.test_scheme_parse_coverage,
+                self.test_conditional_permissions,
+                self.test_conditional_obligations,
+                self.test_temporal_bounds,
             ],
             "classification": [
                 self.test_noevo_agent_classification,
@@ -814,7 +1319,9 @@ class GovernanceTestSuite:
             ],
             "logic_engine": [
                 self.test_logic_engine_available,
-                self.test_policy_expression_generation,
+                self.test_request_facts,
+                self.test_policy_store,
+                self.test_policy_parity_with_engine,
                 self.test_authentication_required,
                 self.test_identifier_validation,
                 self.test_role_permissions,
@@ -825,10 +1332,13 @@ class GovernanceTestSuite:
             "complete_flow": [
                 self.test_complete_governance_flow,
                 self.test_governed_tool_decorator,
+                self.test_session_temporal_bounds,
             ],
             "heartbeat": [
                 self.test_heartbeat_missed_count,
                 self.test_heartbeat_session_integrity,
+                self.test_heartbeat_authentication,
+                self.test_heartbeat_lifecycle,
             ],
         }
 
